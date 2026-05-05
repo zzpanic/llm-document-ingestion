@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  document-ingestion:
+    build: .
+    container_name: llm-document-ingestion
+    ports:
+      - "8000:8000"
+    environment:
+      # LLM Configuration
+      - LM_STUDIO_ENDPOINT=${LM_STUDIO_ENDPOINT:-http://localhost:1234}
+      - LITELM_API_MODEL=${LITELM_API_MODEL:-qwen3.5-9b}
+      # Application Settings
+      - MAX_IMAGES_PER_BATCH=${MAX_IMAGES_PER_BATCH:-100}
+      - MAX_IMAGE_SIZE_MB=${MAX_IMAGE_SIZE_MB:-10}
+    volumes:
+      - ./uploads:/app/uploads
+      - ./extracted:/app/extracted
+      - ./output:/app/output
+      - ./temp:/app/temp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s

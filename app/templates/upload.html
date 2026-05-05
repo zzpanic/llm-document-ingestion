@@ -1,0 +1,17 @@
+<% extends "base.html" %>
+<% block title %>Upload Documents<% endblock %>
+<% block nav_upload %>active<% endblock %>
+
+<% block content %>
+<div class="upload-container">
+    <h2>Upload Document Images</h2>
+    <div id="drop-zone" class="drop-zone">
+        <p>Drag and drop image files here, or click to select</p>
+        <input type="file" id="file-input" multiple accept="image/png,image/jpeg" style="display: none;">
+    </div>
+    <div id="file-list" class="file-list"></div>
+    <div class="actions">
+        <button id="upload-btn" class="btn btn-primary" disabled>Upload Selected Files</button>
+    </div>
+</div>
+<% endblock %>
