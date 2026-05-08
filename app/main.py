@@ -61,6 +61,9 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 _status_tracker: dict[str, dict] = {}
 _status_lock = asyncio.Lock()
 
+# Original filename map: file_id -> original upload filename (e.g. "AS3610-1995_7.png")
+_filename_map: dict[str, str] = {}
+
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
 
@@ -215,6 +218,7 @@ async def upload_images(
                 await f.write(content)
             size_kb = len(content) / 1024
             logger.info(f"Uploaded {file_id[:8]} — {file.filename} ({size_kb:.0f} KB)")
+            _filename_map[file_id] = file.filename
             uploaded.append(UploadFileResponse(id=file_id, filename=file.filename))
         except IOError as e:
             logger.error(f"Failed to save uploaded file {file_id[:8]}: {e}")
@@ -318,7 +322,9 @@ async def download_page(page_id: str) -> FileResponse:
     if not str(file_path.resolve()).startswith(str(settings.EXTRACTED_DIR.resolve())):
         raise HTTPException(status_code=404, detail="Invalid page path")
 
-    return FileResponse(file_path, filename=f"{page_id}.md", media_type="text/markdown")
+    original = _filename_map.get(page_id, "")
+    download_name = (Path(original).stem + ".md") if original else f"{page_id}.md"
+    return FileResponse(file_path, filename=download_name, media_type="text/markdown")
 
 
 @router.get("/download/document")
@@ -367,7 +373,7 @@ async def download_zip(request: Request) -> FileResponse:
     if not done_ids:
         raise HTTPException(status_code=400, detail="No extracted files to archive")
 
-    zip_path_str = await create_zip_archive(done_ids)
+    zip_path_str = await create_zip_archive(done_ids, filename_map=_filename_map)
     return FileResponse(zip_path_str, filename="document_extraction.zip", media_type="application/zip")
 
 

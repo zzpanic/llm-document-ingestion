@@ -93,7 +93,13 @@ async def assemble_document(file_ids: list[str]) -> str:
     return str(output_path)
 
 
-def _build_zip(zip_path: Path, pages_dir: Path, file_ids: list[str], output_doc: Path) -> int:
+def _build_zip(
+    zip_path: Path,
+    pages_dir: Path,
+    file_ids: list[str],
+    output_doc: Path,
+    filename_map: dict[str, str] | None = None,
+) -> int:
     """Synchronous helper that builds the zip archive; run via asyncio.to_thread."""
     added_count = 0
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -101,7 +107,9 @@ def _build_zip(zip_path: Path, pages_dir: Path, file_ids: list[str], output_doc:
             page_path = pages_dir / f"page_{page_id}.md"
             if page_path.exists():
                 try:
-                    archive.write(page_path, f"pages/page_{page_id}.md")
+                    original = (filename_map or {}).get(page_id, "")
+                    archive_name = (Path(original).stem + ".md") if original else f"page_{page_id}.md"
+                    archive.write(page_path, f"pages/{archive_name}")
                     added_count += 1
                 except IOError as e:
                     logger.warning(f"Failed to add page {page_id} to archive: {e}")
@@ -115,7 +123,7 @@ def _build_zip(zip_path: Path, pages_dir: Path, file_ids: list[str], output_doc:
     return added_count
 
 
-async def create_zip_archive(file_ids: list[str]) -> str:
+async def create_zip_archive(file_ids: list[str], filename_map: dict[str, str] | None = None) -> str:
     """Create a zip archive containing all extracted files and the merged document.
 
     Packages per-page markdown files and the assembled document into
@@ -147,7 +155,7 @@ async def create_zip_archive(file_ids: list[str]) -> str:
 
     try:
         added_count = await asyncio.to_thread(
-            _build_zip, zip_path, pages_dir, file_ids, output_doc
+            _build_zip, zip_path, pages_dir, file_ids, output_doc, filename_map
         )
         logger.info(f"Created zip archive: {zip_path} ({added_count} pages)")
     except IOError as e:
