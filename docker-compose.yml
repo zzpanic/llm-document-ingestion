@@ -20,6 +20,7 @@ services:
       - ./extracted:/app/extracted
       - ./output:/app/output
       - ./temp:/app/temp
+      - ./prompt.txt:/app/prompt.txt:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]

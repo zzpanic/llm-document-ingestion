@@ -24,7 +24,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# System prompt instructing the model to produce structured markdown with LaTeX math.
+# Default system prompt — used when no prompt.txt file is present.
 # See algorithm.md, Appendix B for document-type-specific prompt variations.
 EXTRACTION_PROMPT: str = (
     "You are extracting text from a technical document image. Produce structured "
@@ -42,6 +42,20 @@ EXTRACTION_PROMPT: str = (
     "   - Maintain column alignments and merged cells if visible\n\n"
     "4. PRIORITY: Structure over prose."
 )
+
+
+def _load_prompt() -> str:
+    """Load extraction prompt from prompt.txt if present, else use built-in default."""
+    prompt_file = settings.BASE_DIR / "prompt.txt"
+    if prompt_file.exists():
+        text = prompt_file.read_text(encoding="utf-8").strip()
+        if text:
+            logger.info(f"Loaded extraction prompt from {prompt_file}")
+            return text
+    return EXTRACTION_PROMPT
+
+
+ACTIVE_PROMPT: str = _load_prompt()
 
 
 async def extract_single_image(image_path: str) -> str:
@@ -100,7 +114,7 @@ async def extract_single_image(image_path: str) -> str:
         messages = [
             {
                 "role": "system",
-                "content": EXTRACTION_PROMPT
+                "content": ACTIVE_PROMPT
             },
             {
                 "role": "user",
@@ -123,7 +137,7 @@ async def extract_single_image(image_path: str) -> str:
             messages=messages,
             api_base=api_base,
             api_key="not-needed",
-            max_tokens=4096,
+            max_tokens=16384,
             temperature=0,
             timeout=60,
             extra_body={"enable_thinking": False},
