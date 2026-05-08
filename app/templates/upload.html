@@ -1,17 +1,165 @@
-<% extends "base.html" %>
-<% block title %>Upload Documents<% endblock %>
-<% block nav_upload %>active<% endblock %>
+{% extends "base.html" %}
+{% block title %}Upload Documents{% endblock %}
+{% block nav_upload %}active{% endblock %}
 
-<% block content %>
-<div class="upload-container">
-    <h2>Upload Document Images</h2>
-    <div id="drop-zone" class="drop-zone">
-        <p>Drag and drop image files here, or click to select</p>
-        <input type="file" id="file-input" multiple accept="image/png,image/jpeg" style="display: none;">
-    </div>
-    <div id="file-list" class="file-list"></div>
-    <div class="actions">
-        <button id="upload-btn" class="btn btn-primary" disabled>Upload Selected Files</button>
-    </div>
+{% block content %}
+<h2>Upload Document Images</h2>
+
+<div id="drop-zone" class="drop-zone">
+    <p>Drag and drop image files here, or click to select</p>
+    <small>PNG or JPG &nbsp;·&nbsp; Max 10 MB per file</small>
+    <input type="file" id="file-input" multiple accept="image/png,image/jpeg" style="display:none">
 </div>
-<% endblock %>
+
+<div id="file-list" class="file-list"></div>
+<div id="error-msg" class="error-message"></div>
+
+<div class="actions">
+    <button id="upload-btn" class="btn btn-primary" disabled>Upload Selected Files</button>
+    <button id="process-btn" class="btn btn-primary" style="display:none">Process Files</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const dropZone   = document.getElementById('drop-zone');
+    const fileInput  = document.getElementById('file-input');
+    const fileList   = document.getElementById('file-list');
+    const uploadBtn  = document.getElementById('upload-btn');
+    const processBtn = document.getElementById('process-btn');
+    const errorMsg   = document.getElementById('error-msg');
+
+    let selectedFiles = [];
+    let uploadedIds   = [];
+
+    const MAX_SIZE_MB = 10;
+    const ALLOWED     = ['image/png', 'image/jpeg'];
+
+    // ── File selection ───────────────────────────────────
+
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        addFiles(e.dataTransfer.files);
+    });
+
+    fileInput.addEventListener('change', () => {
+        addFiles(fileInput.files);
+        fileInput.value = '';
+    });
+
+    function addFiles(fileObjs) {
+        showError('');
+        let rejected = [];
+        for (const f of fileObjs) {
+            if (!ALLOWED.includes(f.type)) {
+                rejected.push(`${f.name}: unsupported type (PNG/JPG only)`);
+                continue;
+            }
+            if (f.size > MAX_SIZE_MB * 1024 * 1024) {
+                rejected.push(`${f.name}: exceeds ${MAX_SIZE_MB} MB limit`);
+                continue;
+            }
+            selectedFiles.push(f);
+        }
+        if (rejected.length) showError(rejected.join(' · '));
+        renderFileList();
+        uploadBtn.disabled = selectedFiles.length === 0;
+    }
+
+    function removeFile(idx) {
+        selectedFiles.splice(idx, 1);
+        renderFileList();
+        uploadBtn.disabled = selectedFiles.length === 0;
+    }
+
+    function renderFileList() {
+        fileList.innerHTML = selectedFiles.map((f, i) => `
+            <div class="file-item">
+                <span class="file-item-name">${escHtml(f.name)}</span>
+                <span class="file-item-size">${(f.size / 1024).toFixed(1)} KB</span>
+                <button class="remove-btn" onclick="removeFile(${i})" title="Remove">&#x2715;</button>
+            </div>
+        `).join('');
+    }
+
+    function showError(msg) {
+        errorMsg.textContent = msg;
+        errorMsg.classList.toggle('visible', msg.length > 0);
+    }
+
+    function escHtml(str) {
+        return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // expose for inline onclick
+    window.removeFile = removeFile;
+
+    // ── Upload ───────────────────────────────────────────
+
+    uploadBtn.addEventListener('click', async () => {
+        showError('');
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = 'Uploading…';
+
+        const formData = new FormData();
+        for (const f of selectedFiles) formData.append('files', f);
+
+        try {
+            const resp = await fetch('/upload', { method: 'POST', body: formData });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.detail || `Upload failed (${resp.status})`);
+            }
+            const data = await resp.json();
+            uploadedIds = data.uploaded.map(u => u.id);
+
+            uploadBtn.style.display = 'none';
+            processBtn.style.display = '';
+            showError('');
+        } catch (e) {
+            showError(e.message);
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = 'Upload Selected Files';
+        }
+    });
+
+    // ── Process ──────────────────────────────────────────
+
+    processBtn.addEventListener('click', async () => {
+        processBtn.disabled = true;
+        processBtn.textContent = 'Starting…';
+
+        try {
+            const resp = await fetch('/process', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_ids: uploadedIds }),
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.detail || `Process failed (${resp.status})`);
+            }
+            sessionStorage.setItem('fileIds', JSON.stringify(uploadedIds));
+            window.location.href = '/ui/status';
+        } catch (e) {
+            showError(e.message);
+            processBtn.disabled = false;
+            processBtn.textContent = 'Process Files';
+        }
+    });
+})();
+</script>
+{% endblock %}

@@ -1,35 +1,126 @@
-<% extends "base.html" %>
-<% block title %}Extraction Status<% endblock %>
-<% block nav_status %>active<% endblock %>
+{% extends "base.html" %}
+{% block title %}Extraction Status{% endblock %}
+{% block nav_status %}active{% endblock %}
 
-<% block content %>
-<div class="status-container">
-    <h2>Extraction Status</h2>
-    <table id="status-table" class="status-table">
-        <thead>
-            <tr>
-                <th>Page ID</th>
-                <th>Status</th>
-                <th>Details</th>
-            </tr>
-        </thead>
-        <tbody id="status-body">
-            <!-- Populated by JavaScript -->
-        </tbody>
-    </table>
-    <div class="actions">
-        <button id="download-all-btn" class="btn btn-secondary" style="display: none;">Download All Pages</button>
-        <button id="download-doc-btn" class="btn btn-primary" style="display: none;">Download Document</button>
-        <button id="download-zip-btn" class="btn btn-primary" style="display: none;">Download Zip</button>
-    </div>
+{% block content %}
+<h2>Extraction Status</h2>
+
+<table class="status-table">
+    <thead>
+        <tr>
+            <th>Page ID</th>
+            <th>Status</th>
+            <th>Details</th>
+            <th>Download</th>
+        </tr>
+    </thead>
+    <tbody id="status-body">
+        <tr><td colspan="4" style="color:#94a3b8;text-align:center;padding:2rem">Loading…</td></tr>
+    </tbody>
+</table>
+
+<div class="actions">
+    <button id="download-all-btn" class="btn btn-secondary" style="display:none">Download All Pages</button>
+    <button id="download-zip-btn" class="btn btn-primary" style="display:none">Download Zip</button>
 </div>
-<% endblock %>
+{% endblock %}
 
-<% block scripts %>
+{% block scripts %}
 <script>
-// Status polling and UI updates
-document.addEventListener('DOMContentLoaded', function() {
-    // TODO: Implement status polling logic
-});
+(function () {
+    const tbody      = document.getElementById('status-body');
+    const allBtn     = document.getElementById('download-all-btn');
+    const zipBtn     = document.getElementById('download-zip-btn');
+
+    const fileIds = JSON.parse(sessionStorage.getItem('fileIds') || '[]');
+
+    if (!fileIds.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;text-align:center;padding:2rem">No files in session. <a href="/ui/upload">Upload files</a></td></tr>';
+        return;
+    }
+
+    const TERMINAL = new Set(['done', 'failed']);
+
+    function badgeHtml(state) {
+        const cls = {
+            pending:    'badge-pending',
+            processing: 'badge-processing',
+            done:       'badge-done',
+            failed:     'badge-failed',
+        }[state] || 'badge-pending';
+        return `<span class="badge ${cls}">${state}</span>`;
+    }
+
+    function buildRows(statusMap) {
+        return fileIds.map(id => {
+            const s       = statusMap[id] || { state: 'pending' };
+            const detail  = s.state === 'done'
+                ? `${s.markdown_length.toLocaleString()} chars`
+                : (s.error || '');
+            const dlCell  = s.state === 'done'
+                ? `<a href="/download/pages/${id}" download>Download</a>`
+                : '';
+            return `<tr>
+                <td style="font-family:monospace;font-size:0.8rem">${id.slice(0,8)}&hellip;</td>
+                <td>${badgeHtml(s.state)}</td>
+                <td>${escHtml(detail)}</td>
+                <td>${dlCell}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    function escHtml(str) {
+        return String(str)
+            .replace(/&/g,'&amp;')
+            .replace(/</g,'&lt;')
+            .replace(/>/g,'&gt;');
+    }
+
+    async function poll() {
+        try {
+            const resp = await fetch('/status');
+            if (!resp.ok) return scheduleNext();
+            const data = await resp.json();
+            const statusMap = data.status || {};
+
+            tbody.innerHTML = buildRows(statusMap);
+
+            const states     = fileIds.map(id => (statusMap[id] || {}).state);
+            const anyDone    = states.some(s => s === 'done');
+            const allSettled = states.every(s => TERMINAL.has(s));
+
+            allBtn.style.display = anyDone    ? '' : 'none';
+            zipBtn.style.display = allSettled && anyDone ? '' : 'none';
+
+            if (!allSettled) scheduleNext();
+        } catch (_) {
+            scheduleNext();
+        }
+    }
+
+    function scheduleNext() {
+        setTimeout(poll, 3000);
+    }
+
+    // ── Button handlers ──────────────────────────────────
+
+    zipBtn.addEventListener('click', () => {
+        window.location.href = '/download/zip';
+    });
+
+    allBtn.addEventListener('click', () => {
+        const links = document.querySelectorAll('#status-body a[download]');
+        links.forEach((a, i) => {
+            setTimeout(() => {
+                const tmp = document.createElement('a');
+                tmp.href = a.href;
+                tmp.download = a.download || '';
+                tmp.click();
+            }, i * 300);
+        });
+    });
+
+    poll();
+})();
 </script>
-<% endblock %>
+{% endblock %}

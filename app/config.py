@@ -31,7 +31,7 @@ class Settings:
         """Initialize settings, validating configuration and ensuring directories exist."""
         self.LM_STUDIO_ENDPOINT = os.getenv(
             "LM_STUDIO_ENDPOINT",
-            "http://192.168.1.81:1234"
+            "http://localhost:1234"
         )
         self.LITELM_API_MODEL = os.getenv("LITELM_API_MODEL", "qwen3.5-9b")
 
@@ -52,14 +52,13 @@ class Settings:
     def _validate_configuration(self) -> None:
         """Validate configuration values are reasonable."""
         # Validate endpoint URL
-        try:
-            result = urlparse(self.LM_STUDIO_ENDPOINT)
-            if not all([result.scheme, result.netloc]):
-                raise ValueError(f"Invalid endpoint URL: {self.LM_STUDIO_ENDPOINT}")
-            logger.info(f"Validated LM Studio endpoint: {self.LM_STUDIO_ENDPOINT}")
-        except Exception as e:
-            logger.warning(f"Invalid LM_STUDIO_ENDPOINT: {e}")
-            raise ValueError(f"Invalid LM_STUDIO_ENDPOINT: {e}")
+        parsed = urlparse(self.LM_STUDIO_ENDPOINT)
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError(
+                f"Invalid LM_STUDIO_ENDPOINT: '{self.LM_STUDIO_ENDPOINT}' — must be a valid HTTP URL "
+                f"(e.g. http://localhost:1234)"
+            )
+        logger.info(f"Validated LM Studio endpoint: {self.LM_STUDIO_ENDPOINT}")
 
         # Validate model name is non-empty
         if not self.LITELM_API_MODEL.strip():

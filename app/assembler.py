@@ -8,11 +8,15 @@ specification, Phase 4: Document Assembly.
 
 Recommended libraries:
     - zipfile (stdlib): For creating zip archives
+    - aiofiles>=24.1.0: Async file I/O
 """
 
+import asyncio
 import logging
 import zipfile
 from pathlib import Path
+
+import aiofiles
 
 from app.config import settings
 
@@ -55,8 +59,8 @@ async def assemble_document(file_ids: list[str]) -> str:
         raise IOError(f"Cannot create output directory: {e}")
 
     try:
-        with open(output_path, "w", encoding="utf-8") as outfile:
-            outfile.write("# Extracted Document\n\n")
+        async with aiofiles.open(output_path, "w", encoding="utf-8") as outfile:
+            await outfile.write("# Extracted Document\n\n")
 
             for page_id in file_ids:
                 page_path = pages_dir / f"page_{page_id}.md"
@@ -66,18 +70,17 @@ async def assemble_document(file_ids: list[str]) -> str:
                     continue
 
                 try:
-                    outfile.write(f"\n--- Page: {page_id} ---\n\n")
-
-                    with open(page_path, "r", encoding="utf-8") as infile:
-                        content = infile.read()
-                        outfile.write(content)
-                        outfile.write("\n")
-
+                    await outfile.write(f"\n--- Page: {page_id} ---\n\n")
+                    async with aiofiles.open(page_path, "r", encoding="utf-8") as infile:
+                        content = await infile.read()
+                    await outfile.write(content)
+                    await outfile.write("\n")
                     assembled_count += 1
                 except IOError as e:
                     logger.error(f"Failed to read page {page_id}: {e}")
                     missing_pages.append(page_id)
                     continue
+
     except IOError as e:
         logger.error(f"Failed to write assembled document: {e}")
         raise
@@ -90,11 +93,34 @@ async def assemble_document(file_ids: list[str]) -> str:
     return str(output_path)
 
 
+def _build_zip(zip_path: Path, pages_dir: Path, file_ids: list[str], output_doc: Path) -> int:
+    """Synchronous helper that builds the zip archive; run via asyncio.to_thread."""
+    added_count = 0
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for page_id in file_ids:
+            page_path = pages_dir / f"page_{page_id}.md"
+            if page_path.exists():
+                try:
+                    archive.write(page_path, f"pages/page_{page_id}.md")
+                    added_count += 1
+                except IOError as e:
+                    logger.warning(f"Failed to add page {page_id} to archive: {e}")
+
+        if output_doc.exists():
+            try:
+                archive.write(output_doc, "document.md")
+            except IOError as e:
+                logger.warning(f"Failed to add assembled document to archive: {e}")
+
+    return added_count
+
+
 async def create_zip_archive(file_ids: list[str]) -> str:
     """Create a zip archive containing all extracted files and the merged document.
 
     Packages per-page markdown files and the assembled document into
-    a single zip archive for convenient bulk download.
+    a single zip archive for convenient bulk download. The synchronous
+    zipfile work runs in a thread pool to avoid blocking the event loop.
 
     Args:
         file_ids: List of file IDs to include in the archive.
@@ -120,26 +146,9 @@ async def create_zip_archive(file_ids: list[str]) -> str:
         raise IOError(f"Cannot create temp directory: {e}")
 
     try:
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
-            # Add all extracted page markdowns
-            added_count = 0
-            for page_id in file_ids:
-                page_path = pages_dir / f"page_{page_id}.md"
-                if page_path.exists():
-                    try:
-                        archive.write(page_path, f"pages/page_{page_id}.md")
-                        added_count += 1
-                    except IOError as e:
-                        logger.warning(f"Failed to add page {page_id} to archive: {e}")
-                        continue
-
-            # Add assembled document if it exists
-            if output_doc.exists():
-                try:
-                    archive.write(output_doc, "document.md")
-                except IOError as e:
-                    logger.warning(f"Failed to add assembled document to archive: {e}")
-
+        added_count = await asyncio.to_thread(
+            _build_zip, zip_path, pages_dir, file_ids, output_doc
+        )
         logger.info(f"Created zip archive: {zip_path} ({added_count} pages)")
     except IOError as e:
         logger.error(f"Failed to create zip archive: {e}")

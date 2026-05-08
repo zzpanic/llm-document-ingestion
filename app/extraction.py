@@ -14,7 +14,6 @@ Recommended libraries:
 import asyncio
 import base64
 import logging
-from pathlib import Path
 from typing import Dict
 
 import aiofiles
@@ -73,6 +72,9 @@ async def extract_single_image(image_path: str) -> str:
             image_data = await image_file.read()
             base64_image = base64.b64encode(image_data).decode("utf-8")
 
+        # Derive MIME type from file extension so JPGs are sent correctly
+        mime_type = "image/jpeg" if image_path.lower().endswith((".jpg", ".jpeg")) else "image/png"
+
         # Construct multi-modal message for litellm
         messages = [
             {
@@ -84,7 +86,7 @@ async def extract_single_image(image_path: str) -> str:
                 "content": [
                     {
                         "type": "image_url",
-                        "image_url": f"data:image/png;base64,{base64_image}"
+                        "image_url": f"data:{mime_type};base64,{base64_image}"
                     }
                 ]
             }
@@ -100,8 +102,8 @@ async def extract_single_image(image_path: str) -> str:
             timeout=60,
         )
 
-        # Extract markdown from response
-        markdown = response["choices"][0]["message"]["content"]
+        # Extract markdown from response (ModelResponse object, not dict)
+        markdown = response.choices[0].message.content
         logger.info(f"Successfully extracted {len(markdown)} chars from {image_path}")
         return markdown
 
@@ -143,8 +145,6 @@ async def extract_batch(image_paths: list[str]) -> Dict[str, str]:
         >>> for path, md in results.items():
         ...     print(f"{path}: {len(md)} chars")
     """
-    import asyncio
-
     results: Dict[str, str] = {}
 
     # Process images concurrently using asyncio.gather

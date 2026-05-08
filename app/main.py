@@ -16,7 +16,6 @@ Recommended libraries:
 import asyncio
 import logging
 import re
-import secrets
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -35,8 +34,9 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Templating
-from slowapi import Limiter
+from fastapi.templating import Jinja2Templates
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.extraction import extract_single_image
@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Template engine for HTML rendering
-templates = Templating(directory=str(Path(__file__).parent / "templates"))
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 # In-memory status tracker: file_id -> {state, markdown_length, error}
 _status_tracker: dict[str, dict] = {}
@@ -379,7 +379,7 @@ app.add_middleware(
 )
 
 app.state.limiter = limiter
-app.add_exception_handler(Exception, lambda request, exc: HTTPException(status_code=500, detail="Internal server error"))
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.on_event("startup")

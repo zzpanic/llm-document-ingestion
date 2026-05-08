@@ -92,10 +92,10 @@ python -m uvicorn app.main:app --reload
 ### Docker (1 command)
 
 ```bash
-# With LM Studio on localhost:1234
+# Docker Desktop (Mac/Windows) — host.docker.internal reaches the host machine
 docker-compose up -d
 
-# With custom LM Studio endpoint
+# Linux host or remote LM Studio — set the LAN IP explicitly
 LM_STUDIO_ENDPOINT=http://192.168.1.81:1234 docker-compose up -d
 
 # View logs
@@ -122,9 +122,8 @@ docker-compose down
    - See error messages for failed pages
 
 3. **Download Page** (`/ui/download`)
-   - Download individual page markdown
-   - Download fully assembled document
-   - Download zip archive of all outputs
+   - Download individual page markdown files
+   - Download zip archive of all extracted pages
 
 ### REST API
 
@@ -325,10 +324,10 @@ llm-document-ingestion/
 ├── requirements.txt             # Python dependencies
 ├── .env.example                 # Configuration template
 ├── README.md                    # This file
-├── CODE_REVIEW.md              # Static code review findings
-├── FIXES_APPLIED.md            # All issues fixed (before/after)
 ├── QUICK_START.md              # Setup and troubleshooting guide
-└── VERIFICATION.md             # Deployment readiness checklist
+├── architectural-whitepaper.md  # Methodology overview
+├── algorithm.md                 # Detailed extraction algorithm
+└── implementation-spec.md       # Implementation details
 ```
 
 ---
@@ -513,12 +512,14 @@ Download extracted markdown for a single page.
 ---
 
 #### GET `/download/document`
-Download fully assembled document.
+Download fully assembled document (all pages merged).
+
+> **Note:** This endpoint requires `POST /assemble` to be called first (not yet exposed via the web UI). Returns 404 until assembly is triggered manually.
 
 **Response:** Markdown file (text/markdown)
 
 **Errors:**
-- 404: Document not found
+- 404: Document not assembled yet
 
 ---
 
@@ -742,10 +743,7 @@ python -m uvicorn app.main:app --reload
 
 ## Documentation
 
-- **[CODE_REVIEW.md](CODE_REVIEW.md)** - Static analysis findings and fixes
-- **[FIXES_APPLIED.md](FIXES_APPLIED.md)** - Detailed before/after of all fixes
 - **[QUICK_START.md](QUICK_START.md)** - Setup guide and troubleshooting
-- **[VERIFICATION.md](VERIFICATION.md)** - Deployment readiness checklist
 - **[architectural-whitepaper.md](architectural-whitepaper.md)** - Methodology overview
 - **[algorithm.md](algorithm.md)** - Detailed extraction algorithm
 - **[implementation-spec.md](implementation-spec.md)** - Implementation details
@@ -763,9 +761,8 @@ MIT License - See LICENSE file for details
 ### Getting Help
 
 1. Check [QUICK_START.md](QUICK_START.md) for common issues
-2. Review [VERIFICATION.md](VERIFICATION.md) for deployment checklist
-3. Check application logs: `docker-compose logs document-ingestion`
-4. Verify LM Studio is accessible and model is loaded
+2. Check application logs: `docker-compose logs document-ingestion`
+3. Verify LM Studio is accessible and model is loaded
 
 ### Reporting Issues
 

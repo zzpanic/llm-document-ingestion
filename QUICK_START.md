@@ -82,12 +82,14 @@ docker-compose build
 ### 2. Start the Container
 
 ```bash
-# With LM Studio on host machine
+# Docker Desktop (Mac/Windows) — default endpoint is host.docker.internal:1234
 docker-compose up -d
 
-# With custom LM Studio endpoint
+# Linux host or remote LM Studio — set the LAN IP in your .env or inline
 LM_STUDIO_ENDPOINT=http://192.168.1.81:1234 docker-compose up -d
 ```
+
+> **Docker networking note:** `localhost` inside a container refers to the container itself, not your host machine. Docker Desktop exposes the host as `host.docker.internal`. On Linux, use the host's LAN IP instead.
 
 ### 3. View Logs
 
@@ -179,10 +181,10 @@ curl http://localhost:8000/download/zip \
 1. **Open upload page** → http://localhost:8000/ui/upload
 2. **Drag and drop** image files or click to select
 3. **Verify files** are listed with correct size and type
-4. **Click Upload** and wait for success message
-5. **Navigate to Status page** → http://localhost:8000/ui/status
+4. **Click "Upload Selected Files"** — files are saved and a "Process Files" button appears
+5. **Click "Process Files"** — extraction starts and you are automatically redirected to the Status page
 6. **Watch extraction progress** (auto-refreshes every 3 seconds)
-7. **Once complete**, click "Download Document" or "Download Zip"
+7. **Once complete**, click "Download All Pages" (individual `.md` files) or "Download Zip" (all pages in one archive)
 
 ### Workflow 2: Batch Process Multiple Documents
 
