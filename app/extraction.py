@@ -92,9 +92,15 @@ async def extract_single_image(image_path: str) -> str:
             }
         ]
 
+        # litellm requires a provider prefix for custom OpenAI-compatible endpoints
+        # (LM Studio, vLLM, Ollama). Auto-add "openai/" if not already present.
+        model = settings.LITELM_API_MODEL
+        if "/" not in model:
+            model = f"openai/{model}"
+
         # Call LLM via litellm (works with any provider) with timeout
         response = await litellm.acompletion(
-            model=settings.LITELM_API_MODEL,
+            model=model,
             messages=messages,
             api_base=settings.LM_STUDIO_ENDPOINT,
             max_tokens=4096,
