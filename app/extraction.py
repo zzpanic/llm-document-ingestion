@@ -85,9 +85,15 @@ async def extract_single_image(image_path: str) -> str:
         if "/" not in model:
             model = f"openai/{model}"
 
+        # openai client appends /chat/completions to api_base, so the base
+        # must include /v1 to reach LM Studio's OpenAI-compatible endpoint.
+        api_base = settings.LM_STUDIO_ENDPOINT.rstrip("/")
+        if not api_base.endswith("/v1"):
+            api_base = f"{api_base}/v1"
+
         logger.info(
             f"Extracting {short_id} ({size_kb:.0f} KB, {mime_type}) "
-            f"→ {model} @ {settings.LM_STUDIO_ENDPOINT}"
+            f"→ {model} @ {api_base}"
         )
 
         # Construct multi-modal message for litellm
@@ -115,7 +121,7 @@ async def extract_single_image(image_path: str) -> str:
         response = await litellm.acompletion(
             model=model,
             messages=messages,
-            api_base=settings.LM_STUDIO_ENDPOINT,
+            api_base=api_base,
             api_key="not-needed",
             max_tokens=4096,
             temperature=0,

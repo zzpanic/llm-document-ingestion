@@ -261,9 +261,12 @@ async def trigger_extraction(
             _status_tracker[fid] = {"state": "pending"}
 
     model = settings.LITELM_API_MODEL
+    endpoint = settings.LM_STUDIO_ENDPOINT.rstrip("/")
+    if not endpoint.endswith("/v1"):
+        endpoint = f"{endpoint}/v1"
     logger.info(
         f"Processing queued: {len(file_ids)} file(s) "
-        f"using {model} @ {settings.LM_STUDIO_ENDPOINT}"
+        f"using {model} @ {endpoint}"
     )
     background_tasks.add_task(_process_files, file_ids)
 
