@@ -110,6 +110,8 @@ async def extract_single_image(image_path: str) -> str:
         t0 = time.monotonic()
         # api_key is required by the openai client even for local endpoints;
         # LM Studio accepts any non-empty value.
+        # enable_thinking=False: Qwen3 thinking models put output in reasoning_content
+        # and leave content empty, which breaks litellm's response parser.
         response = await litellm.acompletion(
             model=model,
             messages=messages,
@@ -118,6 +120,7 @@ async def extract_single_image(image_path: str) -> str:
             max_tokens=4096,
             temperature=0,
             timeout=60,
+            extra_body={"enable_thinking": False},
         )
         elapsed = time.monotonic() - t0
 
