@@ -89,14 +89,18 @@ python -m uvicorn app.main:app --reload
 # API docs: http://localhost:8000/docs
 ```
 
-### Docker (1 command)
+### Docker
 
 ```bash
+git clone https://github.com/zzpanic/llm-document-ingestion.git
+cd llm-document-ingestion
+docker compose build
+
 # Docker Desktop (Mac/Windows) — host.docker.internal reaches the host machine
-docker-compose up -d
+docker compose up -d
 
 # Linux host or remote LM Studio — set the LAN IP explicitly
-LM_STUDIO_ENDPOINT=http://192.168.1.81:1234 docker-compose up -d
+LM_STUDIO_ENDPOINT=http://192.168.1.81:1234 docker compose up -d
 
 # View logs
 docker-compose logs -f document-ingestion

@@ -14,6 +14,7 @@
 ### 1. Clone and Setup
 
 ```bash
+git clone https://github.com/zzpanic/llm-document-ingestion.git
 cd llm-document-ingestion
 
 # Create virtual environment
@@ -73,10 +74,12 @@ Open your browser and navigate to:
 
 ## Docker Deployment
 
-### 1. Build the Image
+### 1. Clone and Build the Image
 
 ```bash
-docker-compose build
+git clone https://github.com/zzpanic/llm-document-ingestion.git
+cd llm-document-ingestion
+docker compose build
 ```
 
 ### 2. Start the Container

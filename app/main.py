@@ -32,7 +32,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -343,22 +343,27 @@ async def download_zip(request: Request) -> FileResponse:
 
 # --- Web UI Endpoints ---
 
+@router.get("/")
+async def root() -> RedirectResponse:
+    return RedirectResponse(url="/ui/upload")
+
+
 @router.get("/ui/upload", response_class=HTMLResponse)
 async def render_upload_page(request: Request) -> HTMLResponse:
     """Render the upload page HTML template."""
-    return templates.TemplateResponse("upload.html", {"request": request})
+    return templates.TemplateResponse(request, "upload.html")
 
 
 @router.get("/ui/status", response_class=HTMLResponse)
 async def render_status_page(request: Request) -> HTMLResponse:
     """Render the status page HTML template."""
-    return templates.TemplateResponse("status.html", {"request": request})
+    return templates.TemplateResponse(request, "status.html")
 
 
 @router.get("/ui/download", response_class=HTMLResponse)
 async def render_download_page(request: Request) -> HTMLResponse:
     """Render the download page HTML template."""
-    return templates.TemplateResponse("download.html", {"request": request})
+    return templates.TemplateResponse(request, "download.html")
 
 
 # Create FastAPI app instance
