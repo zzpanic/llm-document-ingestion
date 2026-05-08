@@ -21,6 +21,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
 import aiofiles
 from fastapi import (
     FastAPI,
@@ -68,45 +74,58 @@ async def _process_files(file_ids: list[str]) -> None:
     Args:
         file_ids: List of file IDs to extract.
     """
-    for file_id in file_ids:
+    total = len(file_ids)
+    logger.info(f"Extraction batch started: {total} file(s)")
+
+    done = failed = 0
+    for n, file_id in enumerate(file_ids, 1):
+        short = file_id[:8]
         async with _status_lock:
             _status_tracker[file_id] = {"state": "processing"}
 
         image_path = await _find_image_file(file_id)
         if not image_path:
+            logger.warning(f"[{n}/{total}] {short}: image file not found, skipping")
             async with _status_lock:
                 _status_tracker[file_id] = {
                     "state": "failed",
                     "error": f"Image not found: {file_id}"
                 }
+            failed += 1
             continue
 
+        logger.info(f"[{n}/{total}] Processing {short} ({image_path.name})")
         markdown = await extract_single_image(str(image_path))
 
         if markdown == "FAILED":
+            logger.warning(f"[{n}/{total}] {short}: extraction failed")
             async with _status_lock:
                 _status_tracker[file_id] = {
                     "state": "failed",
                     "error": "Extraction returned FAILED"
                 }
+            failed += 1
         else:
             extracted_path = settings.EXTRACTED_DIR / f"page_{file_id}.md"
             try:
                 async with aiofiles.open(extracted_path, "w", encoding="utf-8") as f:
                     await f.write(markdown)
-
                 async with _status_lock:
                     _status_tracker[file_id] = {
                         "state": "done",
                         "markdown_length": len(markdown)
                     }
+                done += 1
             except IOError as e:
-                logger.error(f"Failed to write extracted markdown for {file_id}: {e}")
+                logger.error(f"[{n}/{total}] {short}: failed to save output — {e}")
                 async with _status_lock:
                     _status_tracker[file_id] = {
                         "state": "failed",
                         "error": f"Failed to save extracted content: {e}"
                     }
+                failed += 1
+
+    logger.info(f"Extraction batch complete: {done} done, {failed} failed out of {total}")
 
 
 async def _find_image_file(file_id: str) -> Path | None:
@@ -194,14 +213,17 @@ async def upload_images(
             content = await file.read()
             async with aiofiles.open(file_path, "wb") as f:
                 await f.write(content)
+            size_kb = len(content) / 1024
+            logger.info(f"Uploaded {file_id[:8]} — {file.filename} ({size_kb:.0f} KB)")
             uploaded.append(UploadFileResponse(id=file_id, filename=file.filename))
         except IOError as e:
-            logger.error(f"Failed to save uploaded file {file_id}: {e}")
+            logger.error(f"Failed to save uploaded file {file_id[:8]}: {e}")
             raise HTTPException(
                 status_code=500,
                 detail="Failed to save uploaded file"
             )
 
+    logger.info(f"Upload complete: {len(uploaded)} file(s) saved")
     return UploadResponse(uploaded=uploaded)
 
 
@@ -238,6 +260,11 @@ async def trigger_extraction(
         for fid in file_ids:
             _status_tracker[fid] = {"state": "pending"}
 
+    model = settings.LITELM_API_MODEL
+    logger.info(
+        f"Processing queued: {len(file_ids)} file(s) "
+        f"using {model} @ {settings.LM_STUDIO_ENDPOINT}"
+    )
     background_tasks.add_task(_process_files, file_ids)
 
     return ProcessResponse(status="processing_started")
@@ -390,9 +417,15 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 @app.on_event("startup")
 async def startup_event():
     """Initialize application startup tasks."""
-    logger.info("Starting LLM Document Ingestion Service")
-    logger.info(f"LM Studio endpoint: {settings.LM_STUDIO_ENDPOINT}")
-    logger.info(f"Max image size: {settings.MAX_IMAGE_SIZE_MB} MB")
+    logger.info("=" * 60)
+    logger.info("LLM Document Ingestion Service starting")
+    logger.info(f"  Model    : {settings.LITELM_API_MODEL}")
+    logger.info(f"  Endpoint : {settings.LM_STUDIO_ENDPOINT}")
+    logger.info(f"  Max size : {settings.MAX_IMAGE_SIZE_MB} MB per image")
+    logger.info(f"  Max batch: {settings.MAX_IMAGES_PER_BATCH} images")
+    logger.info(f"  Uploads  : {settings.UPLOADS_DIR}")
+    logger.info(f"  Extracted: {settings.EXTRACTED_DIR}")
+    logger.info("=" * 60)
     asyncio.create_task(_cleanup_temp_files())
 
 

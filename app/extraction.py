@@ -14,6 +14,7 @@ Recommended libraries:
 import asyncio
 import base64
 import logging
+import time
 from typing import Dict
 
 import aiofiles
@@ -66,14 +67,28 @@ async def extract_single_image(image_path: str) -> str:
         >>> if result != "FAILED":
         ...     print(f"Extracted {len(result)} characters")
     """
+    short_id = image_path.split("/")[-1].split(".")[0][:8]
     try:
         # Read and encode image as base64 (non-blocking)
         async with aiofiles.open(image_path, "rb") as image_file:
             image_data = await image_file.read()
             base64_image = base64.b64encode(image_data).decode("utf-8")
 
+        size_kb = len(image_data) / 1024
+
         # Derive MIME type from file extension so JPGs are sent correctly
         mime_type = "image/jpeg" if image_path.lower().endswith((".jpg", ".jpeg")) else "image/png"
+
+        # litellm requires a provider prefix for custom OpenAI-compatible endpoints
+        # (LM Studio, vLLM, Ollama). Auto-add "openai/" if not already present.
+        model = settings.LITELM_API_MODEL
+        if "/" not in model:
+            model = f"openai/{model}"
+
+        logger.info(
+            f"Extracting {short_id} ({size_kb:.0f} KB, {mime_type}) "
+            f"→ {model} @ {settings.LM_STUDIO_ENDPOINT}"
+        )
 
         # Construct multi-modal message for litellm
         messages = [
@@ -92,38 +107,38 @@ async def extract_single_image(image_path: str) -> str:
             }
         ]
 
-        # litellm requires a provider prefix for custom OpenAI-compatible endpoints
-        # (LM Studio, vLLM, Ollama). Auto-add "openai/" if not already present.
-        model = settings.LITELM_API_MODEL
-        if "/" not in model:
-            model = f"openai/{model}"
-
-        # Call LLM via litellm (works with any provider) with timeout
+        t0 = time.monotonic()
+        # api_key is required by the openai client even for local endpoints;
+        # LM Studio accepts any non-empty value.
         response = await litellm.acompletion(
             model=model,
             messages=messages,
             api_base=settings.LM_STUDIO_ENDPOINT,
+            api_key="not-needed",
             max_tokens=4096,
             temperature=0,
             timeout=60,
         )
+        elapsed = time.monotonic() - t0
 
         # Extract markdown from response (ModelResponse object, not dict)
         markdown = response.choices[0].message.content
-        logger.info(f"Successfully extracted {len(markdown)} chars from {image_path}")
+        logger.info(
+            f"Done {short_id} → {len(markdown):,} chars in {elapsed:.1f}s"
+        )
         return markdown
 
-    except FileNotFoundError as exc:
-        logger.warning(f"Image file not found: {image_path}")
+    except FileNotFoundError:
+        logger.warning(f"File not found: {image_path}")
         return "FAILED"
-    except TimeoutError as exc:
-        logger.warning(f"Extraction timeout for {image_path}: {exc}")
+    except TimeoutError:
+        logger.warning(f"Timeout extracting {short_id} (>{60}s) — consider smaller images")
         return "FAILED"
     except (ValueError, KeyError) as exc:
-        logger.warning(f"Invalid response format from LLM for {image_path}: {exc}")
+        logger.warning(f"Unexpected response format for {short_id}: {exc}")
         return "FAILED"
     except Exception as exc:
-        logger.error(f"Unexpected error during extraction for {image_path}: {exc}")
+        logger.error(f"Extraction failed for {short_id}: {type(exc).__name__}: {exc}")
         return "FAILED"
 
 
