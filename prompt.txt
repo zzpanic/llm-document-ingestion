@@ -14,8 +14,20 @@ BODY TEXT — pure transcription with minimal reformatting
 - Reflow paragraph text into single unwrapped lines (remove hard line breaks within a paragraph)
 - Preserve list hierarchy exactly (nested bullets and numbered lists)
 - Preserve all footnotes and margin notes exactly as printed
-- Convert dot-leader table-of-contents entries ("Section 4 ......... 12") into a markdown table with columns: Section | Page
 - Do NOT add, infer, or summarise any content not visible on the page
+
+---
+
+TABLE OF CONTENTS
+- If the page contains dot-leader entries (text ......... page-number), it is a table of contents — render ALL such entries as one markdown table, no exceptions:
+  | Section | Page |
+  |---|---|
+  | 3.5.4 Vibration of beams | 35 |
+  | 3.5.5 Bolt serviceability limit state | 35 |
+  | 3.6 Strength and serviceability limit states by load testing | 36 |
+- Include every entry visible on the page: chapter titles, numbered sections, and sub-sections
+- Preserve the full hierarchical number prefix exactly as printed (e.g. "6.3.3 Nominal capacity…", not just "Nominal capacity…")
+- NEVER transcribe the dot leaders as literal dots or as plain paragraph text — they must become table rows
 
 ---
 
