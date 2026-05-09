@@ -76,8 +76,12 @@ async def _process_files(file_ids: list[str]) -> None:
     Args:
         file_ids: Ordered list of IDs previously saved by ``upload_images``.
     """
-    # Sort by original filename so pages are processed in document order
-    file_ids = sorted(file_ids, key=lambda fid: _filename_map.get(fid, fid))
+    def _nat_key(fid: str) -> list:
+        s = _filename_map.get(fid, fid)
+        return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", s)]
+
+    # Natural sort by original filename so _2 comes before _10
+    file_ids = sorted(file_ids, key=_nat_key)
 
     total = len(file_ids)
     num_batches = (total + settings.BATCH_SIZE - 1) // settings.BATCH_SIZE
