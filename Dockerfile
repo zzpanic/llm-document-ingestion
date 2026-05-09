@@ -20,8 +20,9 @@ WORKDIR /app
 # Copy installed packages
 COPY --from=builder /install /usr/local
 
-# Copy application code
+# Copy application code and version file
 COPY app/ ./app/
+COPY VERSION .
 
 # Create necessary directories
 RUN mkdir -p uploads extracted output temp

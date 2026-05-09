@@ -136,6 +136,17 @@ async def _process_files(file_ids: list[str]) -> None:
 
     logger.info(f"Extraction batch complete: {done} done, {failed} failed out of {total}")
 
+    # Auto-create zip so it's ready on the Download page without user action
+    done_ids = [fid for fid in file_ids if _status_tracker.get(fid, {}).get("state") == "done"]
+    if done_ids:
+        first_original = _filename_map.get(done_ids[0], "")
+        zip_basename = Path(first_original).stem if first_original else "extraction"
+        try:
+            zip_path = await create_zip_archive(done_ids, filename_map=_filename_map, zip_basename=zip_basename)
+            logger.info(f"Auto-created zip: {Path(zip_path).name}")
+        except Exception as e:
+            logger.warning(f"Auto-zip creation failed: {e}")
+
 
 async def _find_image_file(file_id: str) -> Path | None:
     """Find the image file for a given file_id, checking both .png and .jpg extensions.

@@ -118,6 +118,7 @@
                 throw new Error(err.detail || `Process failed (${procResp.status})`);
             }
 
+            sessionStorage.removeItem('batchStartTime');
             sessionStorage.setItem('fileIds', JSON.stringify(fileIds));
             sessionStorage.setItem('filenameMap', JSON.stringify(filenameMap));
             window.location.href = '/ui/status';

@@ -58,8 +58,7 @@
     const total = fileIds.length;
     const TERMINAL = new Set(['done', 'failed']);
 
-    let startTime     = null;
-    let firstDoneTime = null;
+    const BATCH_KEY = 'batchStartTime';
 
     function badgeHtml(state) {
         const cls = {
@@ -96,13 +95,19 @@
         const settledCount = doneCount + failedCount;
         const isProcessing = states.some(s => s === 'processing' || s === 'pending');
 
-        if (!isProcessing) { banner.style.display = 'none'; return; }
+        if (!isProcessing) {
+            banner.style.display = 'none';
+            sessionStorage.removeItem(BATCH_KEY);
+            return;
+        }
 
-        if (!startTime) startTime = Date.now();
-        if (doneCount > 0 && !firstDoneTime) firstDoneTime = Date.now();
+        if (!sessionStorage.getItem(BATCH_KEY)) {
+            sessionStorage.setItem(BATCH_KEY, Date.now().toString());
+        }
+        const startTime = parseInt(sessionStorage.getItem(BATCH_KEY));
 
         let etaText = '';
-        if (doneCount > 0 && firstDoneTime) {
+        if (doneCount > 0) {
             const elapsed    = (Date.now() - startTime) / 1000;
             const avgPerFile = elapsed / doneCount;
             const remaining  = total - settledCount;
@@ -147,7 +152,7 @@
 
     function scheduleNext() { setTimeout(poll, 3000); }
 
-    zipBtn.addEventListener('click', () => { window.location.href = '/download/zip'; });
+    zipBtn.addEventListener('click', () => { window.location.href = '/ui/download'; });
 
     allBtn.addEventListener('click', () => {
         document.querySelectorAll('#status-body a[download]').forEach((a, i) => {
