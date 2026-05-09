@@ -1,17 +1,54 @@
-You are extracting text from a technical document image. Produce structured markdown output that preserves:
+Extract the image to clean markdown. Rules:
 
-1. DOCUMENT STRUCTURE:
-   - Main section titles as level-1 headings (#)
-   - Subsection titles as level-2 headings (##)
-   - Preserve all lists, tables, and footnotes
+STRUCTURE
+- Preserve all heading levels exactly (use # through ####)
+- Reflow paragraph text; do not hard-wrap lines
+- Convert "......." dot leaders in tables of contents to proper markdown tables
+- Preserve list hierarchy (nested bullets/numbered lists)
 
-2. MATHEMATICAL FORMULAS:
-   - Inline math MUST use single dollar signs: $E = mc^2$
-   - Displayed equations MUST use double dollar signs: $$...$$
-   - Do NOT use Unicode symbols -- always use LaTeX commands
+HEADERS, FOOTERS & PAGE NUMBERS
+- Capture all header and footer text exactly as it appears
+- Mark headers as: 
+- Mark footers as: 
+- Mark page numbers as: 
+- Place these markers at the top (header/page) and bottom (footer) of the page output
+- Do not omit any marginal text — it will be used in post-processing
 
-3. TABLES:
-   - Preserve table structure using markdown table syntax
-   - Maintain column alignments and merged cells if visible
+FIGURES & IMAGES
+- For every figure, diagram, graph, chart, photo, or line drawing:
+  1. Preserve the figure label and caption exactly as printed (e.g. "Figure 3: Frequency response of the filter")
+  2. Immediately below the caption, write a detailed technical description in this format:
+     > **[Figure N description]** Description text here.
+- The description should be written for an LLM reader with no access to the image:
+  - For graphs/charts: describe axes (labels, units, range), curve shapes, key data points, trends, and any annotations or legend entries; include values as LaTeX where symbolic (e.g. $f_c = 10\,\text{kHz}$)
+  - For diagrams/schematics: describe the topology, components, signal flow, and any labelled nodes or pins
+  - For photos/drawings: describe subject, orientation, and any visible labels or markings
+- If there is no caption, infer a label from context (e.g. "Unlabelled figure") and still provide the description
+- Do not omit figures — a missing figure description is worse than an imperfect one
 
-4. PRIORITY: Structure over prose.
+MATHEMATICS & SYMBOLS
+- ALL equations, expressions, and formulae → LaTeX
+  - Inline: $...$
+  - Display/block: $$...$$
+- ALL symbolic notation → LaTeX, including:
+  - Subscripts/superscripts: $V_{in}$, $x^2$, $T_{amb}$
+  - Greek letters: $\alpha$, $\Delta$, $\omega$
+  - Units with symbols: $\mu\text{A}$, $\Omega$, $\text{dB}$
+  - Operators and relations: $\leq$, $\pm$, $\times$
+- Never use Unicode for any symbol that has a LaTeX equivalent
+- When uncertain whether something is a subscript or abbreviation, treat it as LaTeX
+
+TABLES
+- Render as standard markdown tables with aligned columns
+- Preserve all cell content, including inline LaTeX
+
+PAGE-CONTINUITY AWARENESS
+- This is one page of a multi-page document
+- Do not add any heading for the page itself
+- If the page begins mid-sentence or mid-paragraph, continue from that point without preamble
+- If a heading or paragraph appears cut off at the bottom, render what is visible and stop
+
+OUTPUT
+- Bare markdown only — no commentary, no preamble, no closing remarks
+- No code fences around the output
+- No "Here is the markdown:" or similar framing
