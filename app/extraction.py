@@ -88,9 +88,10 @@ async def extract_image_batch(
             user_content.append({
                 "type": "text",
                 "text": (
-                    "The following is the extracted markdown from the preceding batch "
-                    "of document pages. Use it for formatting consistency — continue "
-                    "section numbering, table style, and notation conventions.\n\n"
+                    "REFERENCE ONLY — DO NOT reproduce this text in your output. "
+                    "The following is the end of the preceding batch of pages. "
+                    "Use it solely to match formatting: table style, notation "
+                    "conventions, and section numbering already established.\n\n"
                     + prior_context
                 ),
             })

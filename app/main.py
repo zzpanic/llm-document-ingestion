@@ -146,7 +146,7 @@ async def _process_files(file_ids: list[str]) -> None:
                             "markdown_length": len(markdown),
                         }
                 done += len(resolved)
-                prior_context = markdown
+                prior_context = markdown[-4000:]
                 logger.info(
                     f"[Batch {batch_num}] Done → {out_path.name} ({len(markdown):,} chars)"
                 )
