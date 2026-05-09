@@ -20,6 +20,8 @@ services:
       - ./output:/app/output
       - ./temp:/app/temp
       - ./prompt.txt:/app/prompt.txt:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
