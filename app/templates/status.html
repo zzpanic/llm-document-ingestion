@@ -5,7 +5,10 @@
 {% block content %}
 <h2>Extraction Status</h2>
 
-<div id="progress-banner" class="progress-banner" style="display:none"></div>
+<div class="upload-header">
+    <div id="progress-banner" class="progress-banner" style="display:none"></div>
+    <button id="cancel-btn" class="btn btn-secondary">Cancel</button>
+</div>
 
 <table class="status-table">
     <thead>
@@ -167,6 +170,13 @@
                 tmp.click();
             }, i * 300);
         });
+    });
+
+    document.getElementById('cancel-btn').addEventListener('click', () => {
+        sessionStorage.removeItem('fileIds');
+        sessionStorage.removeItem('filenameMap');
+        sessionStorage.removeItem('batchStartTime');
+        window.location.href = '/ui/upload';
     });
 
     poll();
