@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import aiofiles
+import httpx
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -507,6 +508,20 @@ async def render_download_page(request: Request) -> HTMLResponse:
 # Application setup
 # ---------------------------------------------------------------------------
 
+async def _probe_llm_endpoint() -> None:
+    """Check whether the configured LLM endpoint is reachable at startup."""
+    base = settings.LM_STUDIO_ENDPOINT.rstrip("/")
+    if not base.endswith("/v1"):
+        base = f"{base}/v1"
+    probe_url = f"{base}/models"
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(probe_url)
+        logger.info(f"  LM Studio : reachable ({probe_url} → HTTP {r.status_code})")
+    except Exception as exc:
+        logger.warning(f"  LM Studio : NOT reachable at {probe_url} — {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage startup and shutdown tasks for the application."""
@@ -518,6 +533,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"  Max batch: {settings.MAX_IMAGES_PER_BATCH} images")
     logger.info(f"  Uploads  : {settings.UPLOADS_DIR}")
     logger.info(f"  Extracted: {settings.EXTRACTED_DIR}")
+    await _probe_llm_endpoint()
     logger.info("=" * 60)
     cleanup_task = asyncio.create_task(_cleanup_temp_files())
     yield
