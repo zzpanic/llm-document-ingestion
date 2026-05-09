@@ -25,30 +25,13 @@
     </div>
 </div>
 
-<div class="section-block">
-    <h3>Individual Pages (current session)</h3>
-    <ul id="page-list" class="page-list">
-        <li class="empty">Loading…</li>
-    </ul>
-</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 (function () {
     const zipBody   = document.getElementById('zip-body');
-    const pageList  = document.getElementById('page-list');
     const clearBtn  = document.getElementById('clear-btn');
-
-    const fileIds     = JSON.parse(sessionStorage.getItem('fileIds') || '[]');
-    const filenameMap = JSON.parse(sessionStorage.getItem('filenameMap') || '{}');
-
-    function mdName(id) {
-        const orig = filenameMap[id] || '';
-        if (!orig) return id + '.md';
-        const dot = orig.lastIndexOf('.');
-        return (dot > 0 ? orig.slice(0, dot) : orig) + '.md';
-    }
 
     // ── Blob download (bypasses SmartScreen on Edge/Windows) ─
     async function downloadViaBlob(url, filename, linkEl) {
@@ -123,36 +106,6 @@
     });
 
     loadZips();
-
-    // ── Individual pages ──────────────────────────────────
-
-    if (!fileIds.length) {
-        pageList.innerHTML = '<li class="empty">No session data. <a href="/ui/upload">Upload files first</a>.</li>';
-    } else {
-        fetch('/status')
-            .then(r => r.json())
-            .then(data => {
-                const statusMap = data.status || {};
-                const doneIds = fileIds.filter(id => (statusMap[id] || {}).state === 'done');
-                if (!doneIds.length) {
-                    pageList.innerHTML = '<li class="empty">No pages extracted yet. <a href="/ui/status">Check status</a>.</li>';
-                } else {
-                    pageList.innerHTML = doneIds.map(id => {
-                        const name = mdName(id);
-                        return `<li><a href="#" data-dl-url="/download/pages/${id}" data-dl-name="${escHtml(name)}">${escHtml(name)}</a></li>`;
-                    }).join('');
-                    document.getElementById('page-list').addEventListener('click', e => {
-                        const a = e.target.closest('a[data-dl-url]');
-                        if (!a) return;
-                        e.preventDefault();
-                        downloadViaBlob(a.dataset.dlUrl, a.dataset.dlName, a);
-                    });
-                }
-            })
-            .catch(() => {
-                pageList.innerHTML = '<li class="empty">Could not load status.</li>';
-            });
-    }
 
     function escHtml(str) {
         return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
