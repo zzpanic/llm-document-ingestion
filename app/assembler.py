@@ -10,6 +10,7 @@ is called automatically at the end of each extraction batch.
 
 import asyncio
 import logging
+import re
 import zipfile
 from pathlib import Path
 
@@ -156,7 +157,8 @@ async def create_zip_archive(
     from datetime import datetime as _dt
 
     timestamp = _dt.now().strftime("%Y%m%d-%H%M%S")
-    zip_path = settings.TEMP_DIR / f"{timestamp}_{zip_basename}.zip"
+    safe_basename = re.sub(r"_+", "_", re.sub(r"[^\w\-]", "_", zip_basename)).strip("_") or "extraction"
+    zip_path = settings.TEMP_DIR / f"{timestamp}_{safe_basename}.zip"
     pages_dir = settings.EXTRACTED_DIR
     output_doc = settings.OUTPUT_DIR / "document.md"
 
