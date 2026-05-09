@@ -57,6 +57,7 @@ templates.env.globals["app_version"] = (
 # In-memory state — reset on restart; not safe for multi-process deployments
 _status_tracker: dict[str, dict] = {}   # file_id → {state, markdown_length, error}
 _status_lock = asyncio.Lock()
+_processing_lock = asyncio.Lock()        # serialises runs so only one document processes at a time
 _filename_map: dict[str, str] = {}       # file_id → original upload filename
 
 limiter = Limiter(key_func=get_remote_address)
@@ -76,6 +77,11 @@ async def _process_files(file_ids: list[str]) -> None:
     Args:
         file_ids: Ordered list of IDs previously saved by ``upload_images``.
     """
+    async with _processing_lock:
+        await _do_process_files(file_ids)
+
+
+async def _do_process_files(file_ids: list[str]) -> None:
     def _nat_key(fid: str) -> list:
         s = _filename_map.get(fid, fid)
         return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", s)]
