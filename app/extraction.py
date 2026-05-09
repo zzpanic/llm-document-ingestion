@@ -127,6 +127,7 @@ async def extract_single_image(image_path: str) -> str:
             max_tokens=16384,
             temperature=0,
             timeout=60,
+            num_retries=0,
             # Qwen3 thinking models put reasoning in reasoning_content and
             # leave content empty, which breaks litellm's response parser.
             extra_body={"enable_thinking": False},
