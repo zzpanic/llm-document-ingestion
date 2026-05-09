@@ -85,6 +85,13 @@
 
     window.removeFile = removeFile;
 
+    function fmtError(detail, fallback) {
+        if (!detail) return fallback;
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) return detail.map(e => e.msg || JSON.stringify(e)).join(' · ');
+        return JSON.stringify(detail);
+    }
+
     // ── Upload & Process ─────────────────────────────────
 
     goBtn.addEventListener('click', async () => {
@@ -99,7 +106,7 @@
             const upResp = await fetch('/upload', { method: 'POST', body: formData });
             if (!upResp.ok) {
                 const err = await upResp.json().catch(() => ({}));
-                throw new Error(err.detail || `Upload failed (${upResp.status})`);
+                throw new Error(fmtError(err.detail, `Upload failed (${upResp.status})`));
             }
             const upData = await upResp.json();
             const fileIds = upData.uploaded.map(u => u.id);
@@ -115,7 +122,7 @@
             });
             if (!procResp.ok) {
                 const err = await procResp.json().catch(() => ({}));
-                throw new Error(err.detail || `Process failed (${procResp.status})`);
+                throw new Error(fmtError(err.detail, `Process failed (${procResp.status})`));
             }
 
             sessionStorage.removeItem('batchStartTime');
