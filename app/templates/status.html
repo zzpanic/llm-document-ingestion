@@ -65,7 +65,11 @@
     const total = fileIds.length;
     const TERMINAL = new Set(['done', 'failed']);
 
-    const BATCH_KEY = 'batchStartTime';
+    // Rolling average: updated each time a batch of pages completes
+    let lastDoneCount = 0;
+    let lastDoneTime  = null;
+    let totalPagesTracked = 0;
+    let totalSecsTracked  = 0;
 
     function badgeHtml(state) {
         const cls = {
@@ -104,21 +108,30 @@
 
         if (!isProcessing) {
             banner.style.display = 'none';
-            sessionStorage.removeItem(BATCH_KEY);
+            lastDoneCount = 0; lastDoneTime = null;
+            totalPagesTracked = 0; totalSecsTracked = 0;
             return;
         }
 
-        if (!sessionStorage.getItem(BATCH_KEY)) {
-            sessionStorage.setItem(BATCH_KEY, Date.now().toString());
+        const now = Date.now();
+
+        // Each time a batch completes (done count increases), record elapsed time
+        if (doneCount > lastDoneCount) {
+            if (lastDoneTime !== null) {
+                totalSecsTracked  += (now - lastDoneTime) / 1000;
+                totalPagesTracked += doneCount - lastDoneCount;
+            }
+            lastDoneCount = doneCount;
+            lastDoneTime  = now;
+        } else if (lastDoneTime === null && doneCount === 0) {
+            lastDoneTime = now;
         }
-        const startTime = parseInt(sessionStorage.getItem(BATCH_KEY));
 
         let etaText = '';
-        if (doneCount > 0) {
-            const elapsed    = (Date.now() - startTime) / 1000;
-            const avgPerFile = elapsed / doneCount;
+        if (totalPagesTracked > 0) {
+            const avgPerPage = totalSecsTracked / totalPagesTracked;
             const remaining  = total - settledCount;
-            const etaSecs    = remaining * avgPerFile;
+            const etaSecs    = remaining * avgPerPage;
             if (etaSecs < 90) {
                 etaText = ` — about ${Math.ceil(etaSecs)}s remaining`;
             } else {
