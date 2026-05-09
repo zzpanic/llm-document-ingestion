@@ -524,7 +524,11 @@ async def preview_page(page_id: str) -> PlainTextResponse:
     """
     if not re.match(r"^[a-f0-9]{32}$", page_id):
         raise HTTPException(status_code=404, detail="Invalid page ID")
-    file_path = settings.EXTRACTED_DIR / f"page_{page_id}.md"
+    batch_file = _status_tracker.get(page_id, {}).get("batch_file")
+    if batch_file:
+        file_path = settings.EXTRACTED_DIR / batch_file
+    else:
+        file_path = settings.EXTRACTED_DIR / f"page_{page_id}.md"
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Page not found")
     return PlainTextResponse(file_path.read_text(encoding="utf-8"))

@@ -78,21 +78,37 @@
         }
     }
 
-    function buildList(doneIds) {
+    function buildList(doneIds, statusMap) {
         if (!doneIds.length) {
             listEl.innerHTML = '<div class="preview-empty">No extracted pages yet.<br><a href="/ui/status">Check status</a></div>';
             return;
         }
-        listEl.innerHTML = doneIds.map(id =>
-            `<a class="preview-list-item" data-id="${id}" title="${escHtml(mdName(id))}">${escHtml(mdName(id))}</a>`
+
+        // Deduplicate: group by batch_file so each batch shows once.
+        // Fall back to per-page label when batch_file is absent (old single-page runs).
+        const seen = new Set();
+        const entries = [];
+        for (const id of doneIds) {
+            const bf = (statusMap[id] || {}).batch_file;
+            const key = bf || id;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const label = bf
+                ? bf.replace(/^pages_/, 'Pages ').replace(/\.md$/, '')
+                : mdName(id);
+            entries.push({ id, label });
+        }
+
+        listEl.innerHTML = entries.map(e =>
+            `<a class="preview-list-item" data-id="${e.id}" title="${escHtml(e.label)}">${escHtml(e.label)}</a>`
         ).join('');
 
         listEl.querySelectorAll('.preview-list-item').forEach(el => {
             el.addEventListener('click', () => loadPreview(el.dataset.id));
         });
 
-        // Auto-load first page
-        loadPreview(doneIds[0]);
+        // Auto-load first entry
+        loadPreview(entries[0].id);
     }
 
     if (!fileIds.length) {
@@ -105,7 +121,7 @@
         .then(data => {
             const statusMap = data.status || {};
             const doneIds = fileIds.filter(id => (statusMap[id] || {}).state === 'done');
-            buildList(doneIds);
+            buildList(doneIds, statusMap);
         })
         .catch(() => {
             listEl.innerHTML = '<div class="preview-empty">Could not load status.</div>';
