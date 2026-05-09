@@ -146,7 +146,7 @@ async def extract_image_batch(
             api_key="not-needed",
             max_tokens=settings.MAX_OUTPUT_TOKENS,
             temperature=0,
-            timeout=900,
+
             num_retries=0,
             # Qwen3 thinking models put reasoning in reasoning_content and
             # leave content empty, which breaks litellm's response parser.
