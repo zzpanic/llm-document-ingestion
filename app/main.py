@@ -25,7 +25,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -374,13 +374,10 @@ async def download_zip(request: Request) -> StreamingResponse:
         done_ids, filename_map=_filename_map, zip_basename=zip_basename
     )
     zip_path = Path(zip_path_str)
-    return StreamingResponse(
-        _stream_file(zip_path),
+    return FileResponse(
+        zip_path,
         media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{zip_path.name}"',
-            "Content-Length": str(zip_path.stat().st_size),
-        },
+        filename=zip_path.name,
     )
 
 
@@ -443,13 +440,10 @@ async def download_named_zip(filename: str) -> StreamingResponse:
         raise HTTPException(status_code=404, detail="Zip not found")
     if not str(file_path.resolve()).startswith(str(settings.TEMP_DIR.resolve())):
         raise HTTPException(status_code=404, detail="Invalid path")
-    return StreamingResponse(
-        _stream_file(file_path),
+    return FileResponse(
+        file_path,
         media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Length": str(file_path.stat().st_size),
-        },
+        filename=filename,
     )
 
 

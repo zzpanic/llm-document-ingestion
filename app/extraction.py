@@ -85,9 +85,11 @@ async def extract_single_image(image_path: str) -> str:
             else "image/png"
         )
 
-        # litellm requires a provider prefix for OpenAI-compatible endpoints
+        # litellm requires the "openai/" provider prefix for OpenAI-compatible
+        # endpoints. Model names like "qwen/qwen2.5-vl-7b" contain a slash but
+        # are not provider-prefixed — check the prefix explicitly.
         model = settings.LITELM_API_MODEL
-        if "/" not in model:
+        if not model.startswith("openai/"):
             model = f"openai/{model}"
 
         # The openai client appends /chat/completions to api_base, so /v1
