@@ -138,8 +138,10 @@
             }
 
             sessionStorage.removeItem('batchStartTime');
-            sessionStorage.setItem('fileIds', JSON.stringify(fileIds));
-            sessionStorage.setItem('filenameMap', JSON.stringify(filenameMap));
+            const prevIds = JSON.parse(sessionStorage.getItem('fileIds') || '[]');
+            const prevMap = JSON.parse(sessionStorage.getItem('filenameMap') || '{}');
+            sessionStorage.setItem('fileIds', JSON.stringify([...prevIds, ...fileIds]));
+            sessionStorage.setItem('filenameMap', JSON.stringify(Object.assign(prevMap, filenameMap)));
             window.location.href = '/ui/status';
         } catch (e) {
             showError(e.message);
