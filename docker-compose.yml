@@ -14,6 +14,8 @@ services:
       # Application settings
       - MAX_IMAGES_PER_BATCH=300
       - MAX_IMAGE_SIZE_MB=10
+      - BATCH_SIZE=${BATCH_SIZE:-10}
+      - MAX_OUTPUT_TOKENS=${MAX_OUTPUT_TOKENS:-65536}
     volumes:
       - ./uploads:/app/uploads
       - ./extracted:/app/extracted
