@@ -5,68 +5,120 @@
 {% block content %}
 <h2>Download Extracted Documents</h2>
 
-<div id="summary" class="summary-panel">
-    <span>Loading…</span>
+<div class="section-block">
+    <h3>Zip Archives</h3>
+    <table class="status-table" id="zip-table">
+        <thead>
+            <tr>
+                <th>Created</th>
+                <th>File</th>
+                <th>Size</th>
+                <th>Download</th>
+            </tr>
+        </thead>
+        <tbody id="zip-body">
+            <tr><td colspan="4" style="color:#94a3b8;text-align:center;padding:1.5rem">Loading…</td></tr>
+        </tbody>
+    </table>
+    <div class="actions" style="margin-top:0.75rem">
+        <button id="clear-btn" class="btn btn-secondary">Clear Temp Folder</button>
+    </div>
 </div>
 
 <div class="section-block">
-    <h3>Individual Pages</h3>
+    <h3>Individual Pages (current session)</h3>
     <ul id="page-list" class="page-list">
         <li class="empty">Loading…</li>
     </ul>
-</div>
-
-<div class="section-block">
-    <h3>Archive</h3>
-    <a id="zip-link" href="/download/zip" class="btn btn-primary">Download Zip Archive</a>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 (function () {
-    const summary  = document.getElementById('summary');
-    const pageList = document.getElementById('page-list');
-    const zipLink  = document.getElementById('zip-link');
+    const zipBody   = document.getElementById('zip-body');
+    const pageList  = document.getElementById('page-list');
+    const clearBtn  = document.getElementById('clear-btn');
 
-    const fileIds = JSON.parse(sessionStorage.getItem('fileIds') || '[]');
+    const fileIds     = JSON.parse(sessionStorage.getItem('fileIds') || '[]');
+    const filenameMap = JSON.parse(sessionStorage.getItem('filenameMap') || '{}');
 
-    if (!fileIds.length) {
-        summary.innerHTML = '<span>No session data found. <a href="/ui/upload">Upload files first</a>.</span>';
-        pageList.innerHTML = '';
-        zipLink.style.display = 'none';
-        return;
+    function mdName(id) {
+        const orig = filenameMap[id] || '';
+        if (!orig) return id + '.md';
+        const dot = orig.lastIndexOf('.');
+        return (dot > 0 ? orig.slice(0, dot) : orig) + '.md';
     }
 
-    fetch('/status')
-        .then(r => r.json())
-        .then(data => {
-            const statusMap = data.status || {};
-            const states    = fileIds.map(id => (statusMap[id] || {}).state);
-            const total     = fileIds.length;
-            const done      = states.filter(s => s === 'done').length;
-            const failed    = states.filter(s => s === 'failed').length;
+    // ── Zip list ─────────────────────────────────────────
 
-            summary.innerHTML = `
-                <span>Total: <strong>${total}</strong></span>
-                <span>Done: <strong style="color:#166534">${done}</strong></span>
-                <span>Failed: <strong style="color:#991b1b">${failed}</strong></span>
-            `;
+    function loadZips() {
+        fetch('/temp/zips')
+            .then(r => r.json())
+            .then(data => {
+                if (!data.zips.length) {
+                    zipBody.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;text-align:center;padding:1.5rem">No zip archives yet.</td></tr>';
+                    return;
+                }
+                zipBody.innerHTML = data.zips.map(z => `
+                    <tr>
+                        <td style="white-space:nowrap">${z.created}</td>
+                        <td style="font-family:monospace;font-size:0.8rem">${escHtml(z.filename)}</td>
+                        <td style="white-space:nowrap">${z.size_kb} KB</td>
+                        <td><a href="/download/zip/${encodeURIComponent(z.filename)}" download="${escHtml(z.filename)}">Download</a></td>
+                    </tr>
+                `).join('');
+            })
+            .catch(() => {
+                zipBody.innerHTML = '<tr><td colspan="4" style="color:#ef4444;text-align:center">Could not load zip list.</td></tr>';
+            });
+    }
 
-            const doneIds = fileIds.filter(id => (statusMap[id] || {}).state === 'done');
+    clearBtn.addEventListener('click', async () => {
+        if (!confirm('Delete all zip archives from the temp folder?')) return;
+        clearBtn.disabled = true;
+        clearBtn.textContent = 'Clearing…';
+        try {
+            const r = await fetch('/temp/clear', { method: 'POST' });
+            const d = await r.json();
+            clearBtn.textContent = `Cleared ${d.deleted} file(s)`;
+            loadZips();
+        } catch (_) {
+            clearBtn.textContent = 'Error — try again';
+        } finally {
+            setTimeout(() => { clearBtn.disabled = false; clearBtn.textContent = 'Clear Temp Folder'; }, 2000);
+        }
+    });
 
-            if (doneIds.length === 0) {
-                pageList.innerHTML = '<li class="empty">No pages extracted yet. <a href="/ui/status">Check status</a>.</li>';
-                zipLink.style.display = 'none';
-            } else {
-                pageList.innerHTML = doneIds.map(id =>
-                    `<li><a href="/download/pages/${id}" download="${id}.md">${id}.md</a></li>`
-                ).join('');
-            }
-        })
-        .catch(() => {
-            summary.innerHTML = '<span>Could not load status. <a href="/ui/status">Go to Status page</a>.</span>';
-        });
+    loadZips();
+
+    // ── Individual pages ──────────────────────────────────
+
+    if (!fileIds.length) {
+        pageList.innerHTML = '<li class="empty">No session data. <a href="/ui/upload">Upload files first</a>.</li>';
+    } else {
+        fetch('/status')
+            .then(r => r.json())
+            .then(data => {
+                const statusMap = data.status || {};
+                const doneIds = fileIds.filter(id => (statusMap[id] || {}).state === 'done');
+                if (!doneIds.length) {
+                    pageList.innerHTML = '<li class="empty">No pages extracted yet. <a href="/ui/status">Check status</a>.</li>';
+                } else {
+                    pageList.innerHTML = doneIds.map(id => {
+                        const name = mdName(id);
+                        return `<li><a href="/download/pages/${id}" download="${escHtml(name)}">${escHtml(name)}</a></li>`;
+                    }).join('');
+                }
+            })
+            .catch(() => {
+                pageList.innerHTML = '<li class="empty">Could not load status.</li>';
+            });
+    }
+
+    function escHtml(str) {
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
 })();
 </script>
 {% endblock %}

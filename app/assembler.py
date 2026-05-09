@@ -123,7 +123,11 @@ def _build_zip(
     return added_count
 
 
-async def create_zip_archive(file_ids: list[str], filename_map: dict[str, str] | None = None) -> str:
+async def create_zip_archive(
+    file_ids: list[str],
+    filename_map: dict[str, str] | None = None,
+    zip_basename: str = "extraction",
+) -> str:
     """Create a zip archive containing all extracted files and the merged document.
 
     Packages per-page markdown files and the assembled document into
@@ -143,7 +147,9 @@ async def create_zip_archive(file_ids: list[str], filename_map: dict[str, str] |
         >>> zip_path = await create_zip_archive(["abc123", "def456"])  # doctest: +SKIP
         >>> print(zip_path)  # doctest: +SKIP
     """
-    zip_path = settings.TEMP_DIR / "document_extraction.zip"
+    from datetime import datetime as _dt
+    timestamp = _dt.now().strftime("%Y%m%d-%H%M%S")
+    zip_path = settings.TEMP_DIR / f"{timestamp}_{zip_basename}.zip"
     pages_dir = settings.EXTRACTED_DIR
     output_doc = settings.OUTPUT_DIR / "document.md"
 

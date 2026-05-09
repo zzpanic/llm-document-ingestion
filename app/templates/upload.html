@@ -15,23 +15,20 @@
 <div id="error-msg" class="error-message"></div>
 
 <div class="actions">
-    <button id="upload-btn" class="btn btn-primary" disabled>Upload Selected Files</button>
-    <button id="process-btn" class="btn btn-primary" style="display:none">Process Files</button>
+    <button id="go-btn" class="btn btn-primary" disabled>Upload &amp; Process</button>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 (function () {
-    const dropZone   = document.getElementById('drop-zone');
-    const fileInput  = document.getElementById('file-input');
-    const fileList   = document.getElementById('file-list');
-    const uploadBtn  = document.getElementById('upload-btn');
-    const processBtn = document.getElementById('process-btn');
-    const errorMsg   = document.getElementById('error-msg');
+    const dropZone  = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const fileList  = document.getElementById('file-list');
+    const goBtn     = document.getElementById('go-btn');
+    const errorMsg  = document.getElementById('error-msg');
 
     let selectedFiles = [];
-    let uploadedIds   = [];
 
     const MAX_SIZE_MB = 10;
     const ALLOWED     = ['image/png', 'image/jpeg'];
@@ -39,50 +36,32 @@
     // ── File selection ───────────────────────────────────
 
     dropZone.addEventListener('click', () => fileInput.click());
-
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.classList.add('dragover');
-    });
-
-    dropZone.addEventListener('dragleave', () => {
-        dropZone.classList.remove('dragover');
-    });
-
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('dragover');
         addFiles(e.dataTransfer.files);
     });
-
-    fileInput.addEventListener('change', () => {
-        addFiles(fileInput.files);
-        fileInput.value = '';
-    });
+    fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
 
     function addFiles(fileObjs) {
         showError('');
-        let rejected = [];
+        const rejected = [];
         for (const f of fileObjs) {
-            if (!ALLOWED.includes(f.type)) {
-                rejected.push(`${f.name}: unsupported type (PNG/JPG only)`);
-                continue;
-            }
-            if (f.size > MAX_SIZE_MB * 1024 * 1024) {
-                rejected.push(`${f.name}: exceeds ${MAX_SIZE_MB} MB limit`);
-                continue;
-            }
+            if (!ALLOWED.includes(f.type)) { rejected.push(`${f.name}: unsupported type (PNG/JPG only)`); continue; }
+            if (f.size > MAX_SIZE_MB * 1024 * 1024) { rejected.push(`${f.name}: exceeds ${MAX_SIZE_MB} MB`); continue; }
             selectedFiles.push(f);
         }
         if (rejected.length) showError(rejected.join(' · '));
         renderFileList();
-        uploadBtn.disabled = selectedFiles.length === 0;
+        goBtn.disabled = selectedFiles.length === 0;
     }
 
     function removeFile(idx) {
         selectedFiles.splice(idx, 1);
         renderFileList();
-        uploadBtn.disabled = selectedFiles.length === 0;
+        goBtn.disabled = selectedFiles.length === 0;
     }
 
     function renderFileList() {
@@ -97,67 +76,55 @@
 
     function showError(msg) {
         errorMsg.textContent = msg;
-        errorMsg.classList.toggle('visible', msg.length > 0);
+        errorMsg.classList.toggle('visible', !!msg);
     }
 
     function escHtml(str) {
         return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
-    // expose for inline onclick
     window.removeFile = removeFile;
 
-    // ── Upload ───────────────────────────────────────────
+    // ── Upload & Process ─────────────────────────────────
 
-    uploadBtn.addEventListener('click', async () => {
+    goBtn.addEventListener('click', async () => {
         showError('');
-        uploadBtn.disabled = true;
-        uploadBtn.textContent = 'Uploading…';
-
-        const formData = new FormData();
-        for (const f of selectedFiles) formData.append('files', f);
+        goBtn.disabled = true;
+        goBtn.textContent = 'Uploading…';
 
         try {
-            const resp = await fetch('/upload', { method: 'POST', body: formData });
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                throw new Error(err.detail || `Upload failed (${resp.status})`);
+            const formData = new FormData();
+            for (const f of selectedFiles) formData.append('files', f);
+
+            const upResp = await fetch('/upload', { method: 'POST', body: formData });
+            if (!upResp.ok) {
+                const err = await upResp.json().catch(() => ({}));
+                throw new Error(err.detail || `Upload failed (${upResp.status})`);
             }
-            const data = await resp.json();
-            uploadedIds = data.uploaded.map(u => u.id);
+            const upData = await upResp.json();
+            const fileIds = upData.uploaded.map(u => u.id);
+            const filenameMap = {};
+            upData.uploaded.forEach(u => { filenameMap[u.id] = u.filename; });
 
-            uploadBtn.style.display = 'none';
-            processBtn.style.display = '';
-            showError('');
-        } catch (e) {
-            showError(e.message);
-            uploadBtn.disabled = false;
-            uploadBtn.textContent = 'Upload Selected Files';
-        }
-    });
+            goBtn.textContent = 'Starting extraction…';
 
-    // ── Process ──────────────────────────────────────────
-
-    processBtn.addEventListener('click', async () => {
-        processBtn.disabled = true;
-        processBtn.textContent = 'Starting…';
-
-        try {
-            const resp = await fetch('/process', {
+            const procResp = await fetch('/process', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ file_ids: uploadedIds }),
+                body: JSON.stringify({ file_ids: fileIds }),
             });
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                throw new Error(err.detail || `Process failed (${resp.status})`);
+            if (!procResp.ok) {
+                const err = await procResp.json().catch(() => ({}));
+                throw new Error(err.detail || `Process failed (${procResp.status})`);
             }
-            sessionStorage.setItem('fileIds', JSON.stringify(uploadedIds));
+
+            sessionStorage.setItem('fileIds', JSON.stringify(fileIds));
+            sessionStorage.setItem('filenameMap', JSON.stringify(filenameMap));
             window.location.href = '/ui/status';
         } catch (e) {
             showError(e.message);
-            processBtn.disabled = false;
-            processBtn.textContent = 'Process Files';
+            goBtn.disabled = false;
+            goBtn.textContent = 'Upload & Process';
         }
     });
 })();

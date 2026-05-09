@@ -5,10 +5,12 @@
 {% block content %}
 <h2>Extraction Status</h2>
 
+<div id="progress-banner" class="progress-banner" style="display:none"></div>
+
 <table class="status-table">
     <thead>
         <tr>
-            <th>Page ID</th>
+            <th>File</th>
             <th>Status</th>
             <th>Details</th>
             <th>Download</th>
@@ -31,15 +33,33 @@
     const tbody      = document.getElementById('status-body');
     const allBtn     = document.getElementById('download-all-btn');
     const zipBtn     = document.getElementById('download-zip-btn');
+    const banner     = document.getElementById('progress-banner');
 
-    const fileIds = JSON.parse(sessionStorage.getItem('fileIds') || '[]');
+    const fileIds     = JSON.parse(sessionStorage.getItem('fileIds') || '[]');
+    const filenameMap = JSON.parse(sessionStorage.getItem('filenameMap') || '{}');
+
+    function mdName(id) {
+        const orig = filenameMap[id] || '';
+        if (!orig) return id + '.md';
+        const dot = orig.lastIndexOf('.');
+        return (dot > 0 ? orig.slice(0, dot) : orig) + '.md';
+    }
+
+    function displayName(id) {
+        const orig = filenameMap[id] || '';
+        return orig || id.slice(0, 8) + '…';
+    }
 
     if (!fileIds.length) {
         tbody.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;text-align:center;padding:2rem">No files in session. <a href="/ui/upload">Upload files</a></td></tr>';
         return;
     }
 
+    const total = fileIds.length;
     const TERMINAL = new Set(['done', 'failed']);
+
+    let startTime     = null;
+    let firstDoneTime = null;
 
     function badgeHtml(state) {
         const cls = {
@@ -53,15 +73,16 @@
 
     function buildRows(statusMap) {
         return fileIds.map(id => {
-            const s       = statusMap[id] || { state: 'pending' };
-            const detail  = s.state === 'done'
+            const s      = statusMap[id] || { state: 'pending' };
+            const detail = s.state === 'done'
                 ? `${s.markdown_length.toLocaleString()} chars`
                 : (s.error || '');
-            const dlCell  = s.state === 'done'
-                ? `<a href="/download/pages/${id}" download>Download</a>`
+            const name   = mdName(id);
+            const dlCell = s.state === 'done'
+                ? `<a href="/download/pages/${id}" download="${name}">${name}</a>`
                 : '';
             return `<tr>
-                <td style="font-family:monospace;font-size:0.8rem">${id.slice(0,8)}&hellip;</td>
+                <td style="font-size:0.8rem">${escHtml(displayName(id))}</td>
                 <td>${badgeHtml(s.state)}</td>
                 <td>${escHtml(detail)}</td>
                 <td>${dlCell}</td>
@@ -69,11 +90,36 @@
         }).join('');
     }
 
+    function updateBanner(states) {
+        const doneCount    = states.filter(s => s === 'done').length;
+        const failedCount  = states.filter(s => s === 'failed').length;
+        const settledCount = doneCount + failedCount;
+        const isProcessing = states.some(s => s === 'processing' || s === 'pending');
+
+        if (!isProcessing) { banner.style.display = 'none'; return; }
+
+        if (!startTime) startTime = Date.now();
+        if (doneCount > 0 && !firstDoneTime) firstDoneTime = Date.now();
+
+        let etaText = '';
+        if (doneCount > 0 && firstDoneTime) {
+            const elapsed    = (Date.now() - startTime) / 1000;
+            const avgPerFile = elapsed / doneCount;
+            const remaining  = total - settledCount;
+            const etaSecs    = remaining * avgPerFile;
+            if (etaSecs < 90) {
+                etaText = ` — about ${Math.ceil(etaSecs)}s remaining`;
+            } else {
+                etaText = ` — about ${Math.ceil(etaSecs / 60)} min remaining`;
+            }
+        }
+
+        banner.style.display = '';
+        banner.textContent = `File ${Math.min(settledCount + 1, total)} of ${total} processing${etaText}`;
+    }
+
     function escHtml(str) {
-        return String(str)
-            .replace(/&/g,'&amp;')
-            .replace(/</g,'&lt;')
-            .replace(/>/g,'&gt;');
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
     async function poll() {
@@ -89,7 +135,8 @@
             const anyDone    = states.some(s => s === 'done');
             const allSettled = states.every(s => TERMINAL.has(s));
 
-            allBtn.style.display = anyDone    ? '' : 'none';
+            updateBanner(states);
+            allBtn.style.display = anyDone               ? '' : 'none';
             zipBtn.style.display = allSettled && anyDone ? '' : 'none';
 
             if (!allSettled) scheduleNext();
@@ -98,19 +145,12 @@
         }
     }
 
-    function scheduleNext() {
-        setTimeout(poll, 3000);
-    }
+    function scheduleNext() { setTimeout(poll, 3000); }
 
-    // ── Button handlers ──────────────────────────────────
-
-    zipBtn.addEventListener('click', () => {
-        window.location.href = '/download/zip';
-    });
+    zipBtn.addEventListener('click', () => { window.location.href = '/download/zip'; });
 
     allBtn.addEventListener('click', () => {
-        const links = document.querySelectorAll('#status-body a[download]');
-        links.forEach((a, i) => {
+        document.querySelectorAll('#status-body a[download]').forEach((a, i) => {
             setTimeout(() => {
                 const tmp = document.createElement('a');
                 tmp.href = a.href;

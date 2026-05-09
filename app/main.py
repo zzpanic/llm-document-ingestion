@@ -373,11 +373,57 @@ async def download_zip(request: Request) -> FileResponse:
     if not done_ids:
         raise HTTPException(status_code=400, detail="No extracted files to archive")
 
-    zip_path_str = await create_zip_archive(done_ids, filename_map=_filename_map)
-    return FileResponse(zip_path_str, filename="document_extraction.zip", media_type="application/zip")
+    first_id = done_ids[0] if done_ids else None
+    original = _filename_map.get(first_id, "") if first_id else ""
+    zip_basename = Path(original).stem if original else "extraction"
+
+    zip_path_str = await create_zip_archive(done_ids, filename_map=_filename_map, zip_basename=zip_basename)
+    zip_filename = Path(zip_path_str).name
+    return FileResponse(zip_path_str, filename=zip_filename, media_type="application/zip")
 
 
 # --- Web UI Endpoints ---
+
+@router.get("/temp/zips")
+async def list_temp_zips() -> dict:
+    """List all zip archives in the temp directory."""
+    zips = []
+    for f in sorted(settings.TEMP_DIR.glob("*.zip"), key=lambda x: x.stat().st_mtime, reverse=True):
+        stat = f.stat()
+        zips.append({
+            "filename": f.name,
+            "size_kb": round(stat.st_size / 1024, 1),
+            "created": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+        })
+    return {"zips": zips}
+
+
+@router.post("/temp/clear")
+async def clear_temp_zips() -> dict:
+    """Delete all zip archives from the temp directory."""
+    deleted = 0
+    for f in settings.TEMP_DIR.glob("*.zip"):
+        try:
+            f.unlink()
+            deleted += 1
+        except OSError as e:
+            logger.warning(f"Could not delete {f.name}: {e}")
+    logger.info(f"Cleared {deleted} zip file(s) from temp directory")
+    return {"deleted": deleted}
+
+
+@router.get("/download/zip/{filename}")
+async def download_named_zip(filename: str) -> FileResponse:
+    """Download a specific named zip archive."""
+    if not re.match(r"^[\w\-]+\.zip$", filename):
+        raise HTTPException(status_code=404, detail="Invalid filename")
+    file_path = settings.TEMP_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Zip not found")
+    if not str(file_path.resolve()).startswith(str(settings.TEMP_DIR.resolve())):
+        raise HTTPException(status_code=404, detail="Invalid path")
+    return FileResponse(file_path, filename=filename, media_type="application/zip")
+
 
 @router.get("/")
 async def root() -> RedirectResponse:
