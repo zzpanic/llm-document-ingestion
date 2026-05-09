@@ -19,6 +19,16 @@ BODY TEXT — pure transcription with minimal reformatting
 
 ---
 
+DEFINITION AND NOTATION LISTS
+- When a page contains a list of terms, symbols, or notation and their definitions, always render as a consistent two-column markdown table regardless of how the source layout presents them (inline text, paragraph blocks, or tabular formatting):
+  | Term / Symbol | Definition |
+  |---|---|
+- For symbol columns, use LaTeX: $A_g$, $b_{bf}$, etc.
+- For multi-definition symbols (e.g. "= X; or = Y"), place all definitions in the one cell separated by <br>
+- Apply this rule consistently even if the page mixes paragraph and tabular layouts
+
+---
+
 MATHEMATICS AND SYMBOLS
 - All equations, expressions, and formulae → LaTeX
   - Inline: $...$   |   Display/block: $$...$$
