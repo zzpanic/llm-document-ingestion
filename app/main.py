@@ -57,6 +57,12 @@ router = APIRouter()
 # Template engine for HTML rendering
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
+# Inject version into all templates from VERSION file
+_version_file = settings.BASE_DIR / "VERSION"
+templates.env.globals["app_version"] = (
+    _version_file.read_text(encoding="utf-8").strip() if _version_file.exists() else "dev"
+)
+
 # In-memory status tracker: file_id -> {state, markdown_length, error}
 _status_tracker: dict[str, dict] = {}
 _status_lock = asyncio.Lock()
