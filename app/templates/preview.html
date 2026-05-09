@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Preview{% endblock %}
+{% block nav_preview %}active{% endblock %}
+
+{% block content %}
+<h2>Markdown Preview</h2>
+
+<div class="preview-layout">
+    <div id="page-list" class="preview-list">
+        <div class="preview-empty">Loading…</div>
+    </div>
+    <div class="preview-pane">
+        <div id="preview-content" class="preview-empty">
+            Select a page from the list to preview it.
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+(function () {
+    const listEl    = document.getElementById('page-list');
+    const contentEl = document.getElementById('preview-content');
+
+    const fileIds     = JSON.parse(sessionStorage.getItem('fileIds') || '[]');
+    const filenameMap = JSON.parse(sessionStorage.getItem('filenameMap') || '{}');
+
+    marked.use({ gfm: true, breaks: false });
+
+    function mdName(id) {
+        const orig = filenameMap[id] || '';
+        if (!orig) return id.slice(0, 8) + '….md';
+        const dot = orig.lastIndexOf('.');
+        return (dot > 0 ? orig.slice(0, dot) : orig) + '.md';
+    }
+
+    function escHtml(str) {
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    let activeId = null;
+
+    async function loadPreview(id) {
+        if (activeId === id) return;
+        activeId = id;
+
+        document.querySelectorAll('.preview-list-item').forEach(el => {
+            el.classList.toggle('active', el.dataset.id === id);
+        });
+
+        contentEl.className = 'preview-empty';
+        contentEl.textContent = 'Loading…';
+
+        try {
+            const resp = await fetch(`/preview/pages/${id}`);
+            if (!resp.ok) throw new Error(`${resp.status}`);
+            const md = await resp.text();
+            contentEl.className = 'markdown-body';
+            contentEl.innerHTML = marked.parse(md);
+        } catch (e) {
+            contentEl.className = 'preview-empty';
+            contentEl.textContent = `Could not load page: ${e.message}`;
+        }
+    }
+
+    function buildList(doneIds) {
+        if (!doneIds.length) {
+            listEl.innerHTML = '<div class="preview-empty">No extracted pages yet.<br><a href="/ui/status">Check status</a></div>';
+            return;
+        }
+        listEl.innerHTML = doneIds.map(id =>
+            `<a class="preview-list-item" data-id="${id}" title="${escHtml(mdName(id))}">${escHtml(mdName(id))}</a>`
+        ).join('');
+
+        listEl.querySelectorAll('.preview-list-item').forEach(el => {
+            el.addEventListener('click', () => loadPreview(el.dataset.id));
+        });
+
+        // Auto-load first page
+        loadPreview(doneIds[0]);
+    }
+
+    if (!fileIds.length) {
+        listEl.innerHTML = '<div class="preview-empty">No session data.<br><a href="/ui/upload">Upload files first</a></div>';
+        return;
+    }
+
+    fetch('/status')
+        .then(r => r.json())
+        .then(data => {
+            const statusMap = data.status || {};
+            const doneIds = fileIds.filter(id => (statusMap[id] || {}).state === 'done');
+            buildList(doneIds);
+        })
+        .catch(() => {
+            listEl.innerHTML = '<div class="preview-empty">Could not load status.</div>';
+        });
+})();
+</script>
+{% endblock %}

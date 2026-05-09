@@ -38,7 +38,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -428,6 +428,23 @@ async def download_named_zip(filename: str) -> FileResponse:
 @router.get("/")
 async def root() -> RedirectResponse:
     return RedirectResponse(url="/ui/upload")
+
+
+@router.get("/preview/pages/{page_id}", response_class=PlainTextResponse)
+async def preview_page(page_id: str) -> PlainTextResponse:
+    """Return extracted markdown as plain text for in-browser preview."""
+    if not re.match(r"^[a-f0-9]{32}$", page_id):
+        raise HTTPException(status_code=404, detail="Invalid page ID")
+    file_path = settings.EXTRACTED_DIR / f"page_{page_id}.md"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Page not found")
+    return PlainTextResponse(file_path.read_text(encoding="utf-8"))
+
+
+@router.get("/ui/preview", response_class=HTMLResponse)
+async def render_preview_page(request: Request) -> HTMLResponse:
+    """Render the markdown preview page."""
+    return templates.TemplateResponse(request, "preview.html")
 
 
 @router.get("/ui/upload", response_class=HTMLResponse)

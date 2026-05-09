@@ -8,10 +8,14 @@
 </head>
 <body>
     <header>
-        <h1>LLM Document Ingestion Service</h1>
+        <div class="header-title">
+            <h1>LLM Document Ingestion Service</h1>
+            <p class="header-subtitle">Copyright Patrick Nichols &middot; zzpanic@gmail.com &middot; BSD-2-Clause License</p>
+        </div>
         <nav>
             <a href="/ui/upload" class="{% block nav_upload %}{% endblock %}">Upload</a>
             <a href="/ui/status" class="{% block nav_status %}{% endblock %}">Status</a>
+            <a href="/ui/preview" class="{% block nav_preview %}{% endblock %}">Preview</a>
             <a href="/ui/download" class="{% block nav_download %}{% endblock %}">Download</a>
         </nav>
     </header>
