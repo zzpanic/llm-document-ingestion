@@ -35,6 +35,7 @@ class Settings:
         self.MAX_IMAGES_PER_BATCH: int = int(os.getenv("MAX_IMAGES_PER_BATCH", "100"))
         self.MAX_IMAGE_SIZE_MB: int = int(os.getenv("MAX_IMAGE_SIZE_MB", "10"))
         self.BATCH_SIZE: int = int(os.getenv("BATCH_SIZE", "10"))
+        self.MAX_OUTPUT_TOKENS: int = int(os.getenv("MAX_OUTPUT_TOKENS", "32768"))
 
         # Absolute paths derived from the project root (two levels up from this file)
         self.BASE_DIR: Path = Path(__file__).resolve().parent.parent
@@ -66,6 +67,8 @@ class Settings:
             raise ValueError("MAX_IMAGE_SIZE_MB must be >= 1")
         if self.BATCH_SIZE < 1:
             raise ValueError("BATCH_SIZE must be >= 1")
+        if self.MAX_OUTPUT_TOKENS < 1:
+            raise ValueError("MAX_OUTPUT_TOKENS must be >= 1")
 
         logger.info(
             f"Config validated — max images: {self.MAX_IMAGES_PER_BATCH}, "

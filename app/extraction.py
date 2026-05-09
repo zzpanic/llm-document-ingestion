@@ -143,7 +143,7 @@ async def extract_image_batch(
             # api_key is required by the openai client even for local endpoints;
             # LM Studio accepts any non-empty value.
             api_key="not-needed",
-            max_tokens=16384,
+            max_tokens=settings.MAX_OUTPUT_TOKENS,
             temperature=0,
             timeout=300,
             num_retries=0,
