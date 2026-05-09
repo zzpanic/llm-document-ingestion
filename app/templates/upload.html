@@ -5,6 +5,11 @@
 {% block content %}
 <h2>Upload Document Images</h2>
 
+<div class="upload-header">
+    <div id="file-count-banner" class="progress-banner" style="display:none"></div>
+    <button id="go-btn" class="btn btn-primary" disabled>Upload &amp; Process</button>
+</div>
+
 <div id="drop-zone" class="drop-zone">
     <p>Drag and drop image files here, or click to select</p>
     <small>PNG or JPG &nbsp;·&nbsp; Max 10 MB per file</small>
@@ -13,20 +18,17 @@
 
 <div id="file-list" class="file-list"></div>
 <div id="error-msg" class="error-message"></div>
-
-<div class="actions">
-    <button id="go-btn" class="btn btn-primary" disabled>Upload &amp; Process</button>
-</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 (function () {
-    const dropZone  = document.getElementById('drop-zone');
-    const fileInput = document.getElementById('file-input');
-    const fileList  = document.getElementById('file-list');
-    const goBtn     = document.getElementById('go-btn');
-    const errorMsg  = document.getElementById('error-msg');
+    const dropZone       = document.getElementById('drop-zone');
+    const fileInput      = document.getElementById('file-input');
+    const fileList       = document.getElementById('file-list');
+    const goBtn          = document.getElementById('go-btn');
+    const errorMsg       = document.getElementById('error-msg');
+    const fileCountBanner = document.getElementById('file-count-banner');
 
     let selectedFiles = [];
 
@@ -65,6 +67,13 @@
     }
 
     function renderFileList() {
+        const count = selectedFiles.length;
+        if (count > 0) {
+            fileCountBanner.style.display = '';
+            fileCountBanner.textContent = `${count} document${count === 1 ? '' : 's'} in list`;
+        } else {
+            fileCountBanner.style.display = 'none';
+        }
         fileList.innerHTML = selectedFiles.map((f, i) => `
             <div class="file-item">
                 <span class="file-item-name">${escHtml(f.name)}</span>

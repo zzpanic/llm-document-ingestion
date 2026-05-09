@@ -480,3 +480,21 @@ footer a:hover {
     font-weight: 500;
     margin-bottom: 1rem;
 }
+
+/* ── Upload page header row ──────────────────────────── */
+
+.upload-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.upload-header #go-btn {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.upload-header .progress-banner {
+    margin-bottom: 0;
+}
