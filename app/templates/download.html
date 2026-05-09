@@ -50,6 +50,31 @@
         return (dot > 0 ? orig.slice(0, dot) : orig) + '.md';
     }
 
+    // ── Blob download (bypasses SmartScreen on Edge/Windows) ─
+    async function downloadViaBlob(url, filename, linkEl) {
+        const orig = linkEl.textContent;
+        linkEl.textContent = 'Downloading…';
+        linkEl.style.pointerEvents = 'none';
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(resp.status);
+            const blob = await resp.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+        } catch (e) {
+            alert('Download failed: ' + e.message);
+        } finally {
+            linkEl.textContent = orig;
+            linkEl.style.pointerEvents = '';
+        }
+    }
+
     // ── Zip list ─────────────────────────────────────────
 
     function loadZips() {
@@ -65,7 +90,7 @@
                         <td style="white-space:nowrap">${z.created}</td>
                         <td style="font-family:monospace;font-size:0.8rem">${escHtml(z.filename)}</td>
                         <td style="white-space:nowrap">${z.size_kb} KB</td>
-                        <td><a href="/download/zip/${encodeURIComponent(z.filename)}" download="${escHtml(z.filename)}">Download</a></td>
+                        <td><a href="#" data-dl-url="/download/zip/${encodeURIComponent(z.filename)}" data-dl-name="${escHtml(z.filename)}">Download</a></td>
                     </tr>
                 `).join('');
             })
@@ -73,6 +98,13 @@
                 zipBody.innerHTML = '<tr><td colspan="4" style="color:#ef4444;text-align:center">Could not load zip list.</td></tr>';
             });
     }
+
+    document.getElementById('zip-table').addEventListener('click', e => {
+        const a = e.target.closest('a[data-dl-url]');
+        if (!a) return;
+        e.preventDefault();
+        downloadViaBlob(a.dataset.dlUrl, a.dataset.dlName, a);
+    });
 
     clearBtn.addEventListener('click', async () => {
         if (!confirm('Delete all zip archives from the temp folder?')) return;
@@ -107,8 +139,14 @@
                 } else {
                     pageList.innerHTML = doneIds.map(id => {
                         const name = mdName(id);
-                        return `<li><a href="/download/pages/${id}" download="${escHtml(name)}">${escHtml(name)}</a></li>`;
+                        return `<li><a href="#" data-dl-url="/download/pages/${id}" data-dl-name="${escHtml(name)}">${escHtml(name)}</a></li>`;
                     }).join('');
+                    document.getElementById('page-list').addEventListener('click', e => {
+                        const a = e.target.closest('a[data-dl-url]');
+                        if (!a) return;
+                        e.preventDefault();
+                        downloadViaBlob(a.dataset.dlUrl, a.dataset.dlName, a);
+                    });
                 }
             })
             .catch(() => {
