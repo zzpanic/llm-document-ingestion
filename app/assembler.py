@@ -90,36 +90,50 @@ def _build_zip(
     file_ids: list[str],
     output_doc: Path,
     filename_map: dict[str, str] | None = None,
+    batch_files: list[str] | None = None,
 ) -> int:
     """Synchronous zip builder — intended to be run via ``asyncio.to_thread``.
 
     Args:
         zip_path: Destination path for the zip file.
-        pages_dir: Directory containing ``page_{id}.md`` files.
-        file_ids: IDs of pages to include.
+        pages_dir: Directory containing extracted markdown files.
+        file_ids: IDs of pages to include (used when batch_files is None).
         output_doc: Path to ``document.md``; included if it exists.
         filename_map: Optional mapping of file_id to original filename.
-            When provided, files inside the zip use the original stem
-            (e.g. ``AS3610-1995_7.md``) instead of ``page_{id}.md``.
+        batch_files: When provided, zip these named batch files (e.g.
+            ``["pages_1-10.md", "pages_11-20.md"]``) instead of per-page
+            files. Each is stored at the top level of the archive.
 
     Returns:
-        Number of page files successfully added to the archive.
+        Number of files successfully added to the archive.
     """
     added = 0
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for page_id in file_ids:
-            page_path = pages_dir / f"page_{page_id}.md"
-            if not page_path.exists():
-                continue
-            try:
-                original = (filename_map or {}).get(page_id, "")
-                archive_name = (
-                    (Path(original).stem + ".md") if original else f"page_{page_id}.md"
-                )
-                archive.write(page_path, f"pages/{archive_name}")
-                added += 1
-            except IOError as e:
-                logger.warning(f"Could not add page {page_id} to archive: {e}")
+        if batch_files:
+            for bf in batch_files:
+                batch_path = pages_dir / bf
+                if not batch_path.exists():
+                    logger.warning(f"Batch file missing, skipping: {bf}")
+                    continue
+                try:
+                    archive.write(batch_path, bf)
+                    added += 1
+                except IOError as e:
+                    logger.warning(f"Could not add {bf} to archive: {e}")
+        else:
+            for page_id in file_ids:
+                page_path = pages_dir / f"page_{page_id}.md"
+                if not page_path.exists():
+                    continue
+                try:
+                    original = (filename_map or {}).get(page_id, "")
+                    archive_name = (
+                        (Path(original).stem + ".md") if original else f"page_{page_id}.md"
+                    )
+                    archive.write(page_path, f"pages/{archive_name}")
+                    added += 1
+                except IOError as e:
+                    logger.warning(f"Could not add page {page_id} to archive: {e}")
 
         if output_doc.exists():
             try:
@@ -134,6 +148,7 @@ async def create_zip_archive(
     file_ids: list[str],
     filename_map: dict[str, str] | None = None,
     zip_basename: str = "extraction",
+    batch_files: list[str] | None = None,
 ) -> str:
     """Create a timestamped zip archive of extracted page files.
 
@@ -169,7 +184,7 @@ async def create_zip_archive(
 
     try:
         added = await asyncio.to_thread(
-            _build_zip, zip_path, pages_dir, file_ids, output_doc, filename_map
+            _build_zip, zip_path, pages_dir, file_ids, output_doc, filename_map, batch_files
         )
         logger.info(f"Created zip: {zip_path.name} ({added} pages)")
     except IOError as e:

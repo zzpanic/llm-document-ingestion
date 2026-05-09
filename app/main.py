@@ -34,7 +34,7 @@ from slowapi.util import get_remote_address
 
 from app.assembler import create_zip_archive
 from app.config import settings
-from app.extraction import extract_single_image
+from app.extraction import extract_image_batch
 from app.models import ProcessRequest, ProcessResponse, UploadFileResponse, UploadResponse
 
 logging.basicConfig(
@@ -76,72 +76,112 @@ async def _process_files(file_ids: list[str]) -> None:
     Args:
         file_ids: Ordered list of IDs previously saved by ``upload_images``.
     """
+    # Sort by original filename so pages are processed in document order
+    file_ids = sorted(file_ids, key=lambda fid: _filename_map.get(fid, fid))
+
     total = len(file_ids)
-    logger.info(f"Extraction batch started: {total} file(s)")
+    num_batches = (total + settings.BATCH_SIZE - 1) // settings.BATCH_SIZE
+    logger.info(
+        f"Extraction batch started: {total} file(s) in {num_batches} batch(es) "
+        f"of up to {settings.BATCH_SIZE}"
+    )
     done = failed = 0
+    prior_context = ""
 
-    for n, file_id in enumerate(file_ids, 1):
-        short = file_id[:8]
+    batches = [
+        file_ids[i:i + settings.BATCH_SIZE]
+        for i in range(0, total, settings.BATCH_SIZE)
+    ]
+
+    for batch_num, batch_ids in enumerate(batches, 1):
+        batch_start = (batch_num - 1) * settings.BATCH_SIZE + 1
+        batch_end = batch_start + len(batch_ids) - 1
+        range_label = f"{batch_start}-{batch_end}"
+        logger.info(f"[Batch {batch_num}/{num_batches}] Pages {range_label}")
+
         async with _status_lock:
-            _status_tracker[file_id] = {"state": "processing"}
+            for fid in batch_ids:
+                _status_tracker[fid] = {"state": "processing"}
 
-        image_path = await _find_image_file(file_id)
-        if not image_path:
-            logger.warning(f"[{n}/{total}] {short}: image not found")
-            async with _status_lock:
-                _status_tracker[file_id] = {
-                    "state": "failed",
-                    "error": f"Image not found: {file_id}",
-                }
-            failed += 1
+        # Resolve image paths; mark any missing files as failed immediately
+        resolved: list[tuple[str, str]] = []
+        for fid in batch_ids:
+            image_path = await _find_image_file(fid)
+            if image_path:
+                resolved.append((fid, str(image_path)))
+            else:
+                logger.warning(f"  {fid[:8]}: image not found")
+                async with _status_lock:
+                    _status_tracker[fid] = {"state": "failed", "error": "Image not found"}
+                failed += 1
+
+        if not resolved:
+            logger.warning(f"[Batch {batch_num}] No images found, skipping")
             continue
 
-        logger.info(f"[{n}/{total}] Processing {short} ({image_path.name})")
-        markdown = await extract_single_image(str(image_path))
+        markdown = await extract_image_batch(
+            [p for _, p in resolved], prior_context=prior_context
+        )
 
         if markdown == "FAILED":
-            logger.warning(f"[{n}/{total}] {short}: extraction failed")
+            logger.warning(f"[Batch {batch_num}] Extraction failed")
             async with _status_lock:
-                _status_tracker[file_id] = {
-                    "state": "failed",
-                    "error": "Extraction returned FAILED",
-                }
-            failed += 1
+                for fid, _ in resolved:
+                    _status_tracker[fid] = {"state": "failed", "error": "Extraction returned FAILED"}
+            failed += len(resolved)
         else:
-            extracted_path = settings.EXTRACTED_DIR / f"page_{file_id}.md"
+            out_path = settings.EXTRACTED_DIR / f"pages_{range_label}.md"
             try:
-                async with aiofiles.open(extracted_path, "w", encoding="utf-8") as f:
+                async with aiofiles.open(out_path, "w", encoding="utf-8") as f:
                     await f.write(markdown)
                 async with _status_lock:
-                    _status_tracker[file_id] = {
-                        "state": "done",
-                        "markdown_length": len(markdown),
-                    }
-                done += 1
+                    for fid, _ in resolved:
+                        _status_tracker[fid] = {
+                            "state": "done",
+                            "batch_file": out_path.name,
+                            "markdown_length": len(markdown),
+                        }
+                done += len(resolved)
+                prior_context = markdown
+                logger.info(
+                    f"[Batch {batch_num}] Done → {out_path.name} ({len(markdown):,} chars)"
+                )
             except IOError as e:
-                logger.error(f"[{n}/{total}] {short}: failed to save output — {e}")
+                logger.error(f"[Batch {batch_num}] Failed to save output — {e}")
                 async with _status_lock:
-                    _status_tracker[file_id] = {
-                        "state": "failed",
-                        "error": f"Failed to save extracted content: {e}",
-                    }
-                failed += 1
+                    for fid, _ in resolved:
+                        _status_tracker[fid] = {
+                            "state": "failed",
+                            "error": f"Failed to save extracted content: {e}",
+                        }
+                failed += len(resolved)
 
     logger.info(
         f"Extraction batch complete: {done} done, {failed} failed out of {total}"
     )
 
-    # Auto-create zip so it is ready on the Download page without user action
+    # Auto-create zip — collect unique batch files in sorted page order
     done_ids = [
         fid for fid in file_ids
         if _status_tracker.get(fid, {}).get("state") == "done"
     ]
     if done_ids:
+        seen_bf: set[str] = set()
+        ordered_batch_files: list[str] = []
+        for fid in file_ids:
+            bf = _status_tracker.get(fid, {}).get("batch_file")
+            if bf and bf not in seen_bf:
+                seen_bf.add(bf)
+                ordered_batch_files.append(bf)
+
         first_original = _filename_map.get(done_ids[0], "")
         zip_basename = Path(first_original).stem if first_original else "extraction"
         try:
             zip_path = await create_zip_archive(
-                done_ids, filename_map=_filename_map, zip_basename=zip_basename
+                done_ids,
+                filename_map=_filename_map,
+                zip_basename=zip_basename,
+                batch_files=ordered_batch_files or None,
             )
             logger.info(f"Auto-created zip: {Path(zip_path).name}")
         except Exception as e:
@@ -306,13 +346,19 @@ async def download_page(page_id: str) -> StreamingResponse:
     """
     if not re.match(r"^[a-f0-9]{32}$", page_id):
         raise HTTPException(status_code=404, detail="Invalid page ID format")
-    file_path = settings.EXTRACTED_DIR / f"page_{page_id}.md"
+    # Batched extraction stores output as pages_{N}-{M}.md; look that up first.
+    batch_file = _status_tracker.get(page_id, {}).get("batch_file")
+    if batch_file:
+        file_path = settings.EXTRACTED_DIR / batch_file
+        download_name = batch_file
+    else:
+        file_path = settings.EXTRACTED_DIR / f"page_{page_id}.md"
+        original = _filename_map.get(page_id, "")
+        download_name = (Path(original).stem + ".md") if original else f"{page_id}.md"
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Page not found")
     if not str(file_path.resolve()).startswith(str(settings.EXTRACTED_DIR.resolve())):
         raise HTTPException(status_code=404, detail="Invalid page path")
-    original = _filename_map.get(page_id, "")
-    download_name = (Path(original).stem + ".md") if original else f"{page_id}.md"
     return StreamingResponse(
         _stream_file(file_path),
         media_type="text/markdown",
@@ -368,10 +414,22 @@ async def download_zip(request: Request) -> StreamingResponse:
         ]
     if not done_ids:
         raise HTTPException(status_code=400, detail="No extracted files to archive")
+    # Sort by original filename and collect unique batch files in page order
+    done_ids = sorted(done_ids, key=lambda fid: _filename_map.get(fid, fid))
+    seen_bf: set[str] = set()
+    batch_files: list[str] = []
+    for fid in done_ids:
+        bf = _status_tracker.get(fid, {}).get("batch_file")
+        if bf and bf not in seen_bf:
+            seen_bf.add(bf)
+            batch_files.append(bf)
     original = _filename_map.get(done_ids[0], "")
     zip_basename = Path(original).stem if original else "extraction"
     zip_path_str = await create_zip_archive(
-        done_ids, filename_map=_filename_map, zip_basename=zip_basename
+        done_ids,
+        filename_map=_filename_map,
+        zip_basename=zip_basename,
+        batch_files=batch_files or None,
     )
     zip_path = Path(zip_path_str)
     return FileResponse(
