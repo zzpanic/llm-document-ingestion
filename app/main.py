@@ -24,7 +24,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -173,6 +173,13 @@ async def _cleanup_temp_files() -> None:
         await asyncio.sleep(3600)
 
 
+async def _stream_file(path: Path, chunk_size: int = 65536):
+    """Yield file contents in chunks using aiofiles for reliable streaming."""
+    async with aiofiles.open(path, "rb") as f:
+        while chunk := await f.read(chunk_size):
+            yield chunk
+
+
 # ---------------------------------------------------------------------------
 # API routes
 # ---------------------------------------------------------------------------
@@ -305,7 +312,14 @@ async def download_page(page_id: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="Invalid page path")
     original = _filename_map.get(page_id, "")
     download_name = (Path(original).stem + ".md") if original else f"{page_id}.md"
-    return FileResponse(file_path, filename=download_name, media_type="text/markdown")
+    return StreamingResponse(
+        _stream_file(file_path),
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_name}"',
+            "Content-Length": str(file_path.stat().st_size),
+        },
+    )
 
 
 @router.get("/download/document")
@@ -351,8 +365,14 @@ async def download_zip(request: Request) -> FileResponse:
     zip_path_str = await create_zip_archive(
         done_ids, filename_map=_filename_map, zip_basename=zip_basename
     )
-    return FileResponse(
-        zip_path_str, filename=Path(zip_path_str).name, media_type="application/zip"
+    zip_path = Path(zip_path_str)
+    return StreamingResponse(
+        _stream_file(zip_path),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{zip_path.name}"',
+            "Content-Length": str(zip_path.stat().st_size),
+        },
     )
 
 
@@ -415,7 +435,14 @@ async def download_named_zip(filename: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="Zip not found")
     if not str(file_path.resolve()).startswith(str(settings.TEMP_DIR.resolve())):
         raise HTTPException(status_code=404, detail="Invalid path")
-    return FileResponse(file_path, filename=filename, media_type="application/zip")
+    return StreamingResponse(
+        _stream_file(file_path),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(file_path.stat().st_size),
+        },
+    )
 
 
 @router.get("/preview/pages/{page_id}", response_class=PlainTextResponse)

@@ -5,16 +5,15 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # LLM Configuration
-      # WARNING: 'localhost' inside a container refers to the container itself, not the host.
-      # For Docker Desktop (Mac/Windows): use http://host.docker.internal:1234
-      # For Linux hosts: use the host's LAN IP (e.g. http://192.168.1.81:1234)
-      # Set LM_STUDIO_ENDPOINT in your .env file to override this default.
-      - LM_STUDIO_ENDPOINT=${LM_STUDIO_ENDPOINT:-http://host.docker.internal:1234}
-      - LITELM_API_MODEL=${LITELM_API_MODEL:-qwen3.5-9b}
-      # Application Settings
-      - MAX_IMAGES_PER_BATCH=${MAX_IMAGES_PER_BATCH:-100}
-      - MAX_IMAGE_SIZE_MB=${MAX_IMAGE_SIZE_MB:-10}
+      # Edit these values directly in Dockge — no .env file needed.
+      # LM Studio endpoint:
+      #   Mac/Windows Docker Desktop : http://host.docker.internal:1234
+      #   Linux host (use LAN IP)    : http://192.168.1.81:1234
+      - LM_STUDIO_ENDPOINT=http://host.docker.internal:1234
+      - LITELM_API_MODEL=qwen3.5-9b
+      # Application settings
+      - MAX_IMAGES_PER_BATCH=300
+      - MAX_IMAGE_SIZE_MB=10
     volumes:
       - ./uploads:/app/uploads
       - ./extracted:/app/extracted
