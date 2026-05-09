@@ -290,7 +290,7 @@ async def check_status() -> dict:
 
 
 @router.get("/download/pages/{page_id}")
-async def download_page(page_id: str) -> FileResponse:
+async def download_page(page_id: str) -> StreamingResponse:
     """Download a single extracted page as a markdown file.
 
     The download filename uses the original upload name (e.g.
@@ -323,7 +323,7 @@ async def download_page(page_id: str) -> FileResponse:
 
 
 @router.get("/download/document")
-async def download_document() -> FileResponse:
+async def download_document() -> StreamingResponse:
     """Download the assembled multi-page document.
 
     Note:
@@ -337,12 +337,19 @@ async def download_document() -> FileResponse:
     file_path = settings.OUTPUT_DIR / "document.md"
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Document not found")
-    return FileResponse(file_path, filename="document.md", media_type="text/markdown")
+    return StreamingResponse(
+        _stream_file(file_path),
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": 'attachment; filename="document.md"',
+            "Content-Length": str(file_path.stat().st_size),
+        },
+    )
 
 
 @router.get("/download/zip")
 @limiter.limit("5/minute")
-async def download_zip(request: Request) -> FileResponse:
+async def download_zip(request: Request) -> StreamingResponse:
     """Create and immediately download a zip of all completed pages.
 
     Generates a timestamped zip in ``temp/`` and streams it to the client.
@@ -417,7 +424,7 @@ async def clear_temp_zips() -> dict:
 
 
 @router.get("/download/zip/{filename}")
-async def download_named_zip(filename: str) -> FileResponse:
+async def download_named_zip(filename: str) -> StreamingResponse:
     """Download a specific named zip archive from the temp directory.
 
     Args:
