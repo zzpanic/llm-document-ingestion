@@ -9,21 +9,15 @@ import asyncio
 import logging
 import re
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)-8s %(name)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 
 import aiofiles
 from fastapi import (
-    FastAPI,
     APIRouter,
     BackgroundTasks,
+    FastAPI,
     File,
     HTTPException,
     Request,
@@ -37,48 +31,54 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from app.extraction import extract_single_image
-from app.assembler import assemble_document, create_zip_archive
+from app.assembler import create_zip_archive
 from app.config import settings
-from app.models import ProcessRequest, ProcessResponse, UploadResponse, UploadFileResponse
+from app.extraction import extract_single_image
+from app.models import ProcessRequest, ProcessResponse, UploadFileResponse, UploadResponse
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Template engine for HTML rendering
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
-# Inject version into all templates from VERSION file
+# Inject version from VERSION file into every template as {{ app_version }}
 _version_file = settings.BASE_DIR / "VERSION"
 templates.env.globals["app_version"] = (
     _version_file.read_text(encoding="utf-8").strip() if _version_file.exists() else "dev"
 )
 
-# In-memory status tracker: file_id -> {state, markdown_length, error}
-_status_tracker: dict[str, dict] = {}
+# In-memory state — reset on restart; not safe for multi-process deployments
+_status_tracker: dict[str, dict] = {}   # file_id → {state, markdown_length, error}
 _status_lock = asyncio.Lock()
+_filename_map: dict[str, str] = {}       # file_id → original upload filename
 
-# Original filename map: file_id -> original upload filename (e.g. "AS3610-1995_7.png")
-_filename_map: dict[str, str] = {}
-
-# Rate limiter
 limiter = Limiter(key_func=get_remote_address)
 
 
-async def _process_files(file_ids: list[str]) -> None:
-    """Background task that extracts markdown from queued file IDs.
+# ---------------------------------------------------------------------------
+# Background helpers
+# ---------------------------------------------------------------------------
 
-    This function runs asynchronously in the background and updates
-    the status tracker as each file is processed.
+async def _process_files(file_ids: list[str]) -> None:
+    """Extract markdown from each queued file and update the status tracker.
+
+    Runs as a FastAPI BackgroundTask. Processes files sequentially so that
+    LM Studio is not overwhelmed. A zip is created automatically when the
+    batch completes.
 
     Args:
-        file_ids: List of file IDs to extract.
+        file_ids: Ordered list of IDs previously saved by ``upload_images``.
     """
     total = len(file_ids)
     logger.info(f"Extraction batch started: {total} file(s)")
-
     done = failed = 0
+
     for n, file_id in enumerate(file_ids, 1):
         short = file_id[:8]
         async with _status_lock:
@@ -86,11 +86,11 @@ async def _process_files(file_ids: list[str]) -> None:
 
         image_path = await _find_image_file(file_id)
         if not image_path:
-            logger.warning(f"[{n}/{total}] {short}: image file not found, skipping")
+            logger.warning(f"[{n}/{total}] {short}: image not found")
             async with _status_lock:
                 _status_tracker[file_id] = {
                     "state": "failed",
-                    "error": f"Image not found: {file_id}"
+                    "error": f"Image not found: {file_id}",
                 }
             failed += 1
             continue
@@ -103,7 +103,7 @@ async def _process_files(file_ids: list[str]) -> None:
             async with _status_lock:
                 _status_tracker[file_id] = {
                     "state": "failed",
-                    "error": "Extraction returned FAILED"
+                    "error": "Extraction returned FAILED",
                 }
             failed += 1
         else:
@@ -114,7 +114,7 @@ async def _process_files(file_ids: list[str]) -> None:
                 async with _status_lock:
                     _status_tracker[file_id] = {
                         "state": "done",
-                        "markdown_length": len(markdown)
+                        "markdown_length": len(markdown),
                     }
                 done += 1
             except IOError as e:
@@ -122,105 +122,104 @@ async def _process_files(file_ids: list[str]) -> None:
                 async with _status_lock:
                     _status_tracker[file_id] = {
                         "state": "failed",
-                        "error": f"Failed to save extracted content: {e}"
+                        "error": f"Failed to save extracted content: {e}",
                     }
                 failed += 1
 
-    logger.info(f"Extraction batch complete: {done} done, {failed} failed out of {total}")
+    logger.info(
+        f"Extraction batch complete: {done} done, {failed} failed out of {total}"
+    )
 
-    # Auto-create zip so it's ready on the Download page without user action
-    done_ids = [fid for fid in file_ids if _status_tracker.get(fid, {}).get("state") == "done"]
+    # Auto-create zip so it is ready on the Download page without user action
+    done_ids = [
+        fid for fid in file_ids
+        if _status_tracker.get(fid, {}).get("state") == "done"
+    ]
     if done_ids:
         first_original = _filename_map.get(done_ids[0], "")
         zip_basename = Path(first_original).stem if first_original else "extraction"
         try:
-            zip_path = await create_zip_archive(done_ids, filename_map=_filename_map, zip_basename=zip_basename)
+            zip_path = await create_zip_archive(
+                done_ids, filename_map=_filename_map, zip_basename=zip_basename
+            )
             logger.info(f"Auto-created zip: {Path(zip_path).name}")
         except Exception as e:
             logger.warning(f"Auto-zip creation failed: {e}")
 
 
 async def _find_image_file(file_id: str) -> Path | None:
-    """Find the image file for a given file_id, checking both .png and .jpg extensions.
+    """Return the uploaded image path for a file ID, or None if not found.
 
-    Args:
-        file_id: The file ID to search for.
-
-    Returns:
-        Path to the image file if found, None otherwise.
+    Checks for both .png and .jpg extensions.
     """
-    for ext in [".png", ".jpg"]:
-        image_path = settings.UPLOADS_DIR / f"{file_id}{ext}"
-        if image_path.exists():
-            return image_path
+    for ext in (".png", ".jpg"):
+        path = settings.UPLOADS_DIR / f"{file_id}{ext}"
+        if path.exists():
+            return path
     return None
 
 
 async def _cleanup_temp_files() -> None:
-    """Periodically delete old temporary zip files."""
+    """Background loop that deletes zip files older than 24 hours every hour."""
     while True:
         try:
-            now = datetime.now()
+            cutoff = datetime.now() - timedelta(days=1)
             for f in settings.TEMP_DIR.glob("*.zip"):
-                if now - datetime.fromtimestamp(f.stat().st_mtime) > timedelta(days=1):
+                if datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
                     f.unlink()
-                    logger.info(f"Deleted old temp file: {f}")
+                    logger.info(f"Deleted stale temp file: {f.name}")
         except Exception as e:
             logger.error(f"Error during temp cleanup: {e}")
+        await asyncio.sleep(3600)
 
-        await asyncio.sleep(3600)  # Run cleanup every hour
 
+# ---------------------------------------------------------------------------
+# API routes
+# ---------------------------------------------------------------------------
 
 @router.post("/upload", response_model=UploadResponse)
 @limiter.limit("10/minute")
 async def upload_images(
     request: Request,
-    files: List[UploadFile] = File(...)
+    files: list[UploadFile] = File(...),
 ) -> UploadResponse:
-    """Upload document images for subsequent extraction.
+    """Save uploaded images and return their assigned IDs.
 
-    Accepts multiple image files (PNG/JPG), validates them, and stores
-    them with unique IDs in the uploads directory.
+    Validates all files before saving any. Supported formats: PNG, JPG.
+    Maximum size per file is controlled by ``MAX_IMAGE_SIZE_MB``.
 
     Args:
-        request: FastAPI Request object (required for rate limiter).
-        files: List of image file uploads. Supported formats: PNG, JPG.
+        request: Required by the slowapi rate limiter.
+        files: One or more image files as multipart/form-data.
 
     Returns:
-        UploadResponse containing list of uploaded file info with IDs.
+        List of ``{id, filename}`` entries, one per saved file.
 
     Raises:
-        HTTPException: If file type is unsupported or size exceeds limit.
-
-    Example:
-        # POST /upload with multipart/form-data
-        # files=[page1.png, page2.png]
+        HTTPException 400: Unsupported content type or file too large.
+        HTTPException 500: I/O error while saving a file.
     """
     ext_map = {"image/png": ".png", "image/jpeg": ".jpg"}
     uploaded = []
 
-    # First pass: validate all files before saving any
+    # Validate all files before saving any to avoid partial uploads
     for file in files:
         if file.content_type not in ext_map:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type: {file.content_type}. Allowed: PNG, JPG"
+                detail=f"Unsupported type: {file.content_type}. Allowed: PNG, JPG",
             )
-
         file_size = file.size or 0
         max_bytes = settings.MAX_IMAGE_SIZE_MB * 1024 * 1024
         if file_size > max_bytes:
             raise HTTPException(
                 status_code=400,
-                detail=f"File size {file_size} exceeds maximum {max_bytes} bytes"
+                detail=f"File {file.filename!r} exceeds the {settings.MAX_IMAGE_SIZE_MB} MB limit",
             )
 
-    # Second pass: save all validated files
     for file in files:
         file_id = uuid.uuid4().hex
-        ext = ext_map[file.content_type]
-        file_path = settings.UPLOADS_DIR / f"{file_id}{ext}"
-
+        file_path = settings.UPLOADS_DIR / f"{file_id}{ext_map[file.content_type]}"
         try:
             content = await file.read()
             async with aiofiles.open(file_path, "wb") as f:
@@ -230,11 +229,8 @@ async def upload_images(
             _filename_map[file_id] = file.filename
             uploaded.append(UploadFileResponse(id=file_id, filename=file.filename))
         except IOError as e:
-            logger.error(f"Failed to save uploaded file {file_id[:8]}: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to save uploaded file"
-            )
+            logger.error(f"Failed to save {file_id[:8]}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to save uploaded file")
 
     logger.info(f"Upload complete: {len(uploaded)} file(s) saved")
     return UploadResponse(uploaded=uploaded)
@@ -245,92 +241,68 @@ async def upload_images(
 async def trigger_extraction(
     request: Request,
     background_tasks: BackgroundTasks,
-    process_request: ProcessRequest
+    process_request: ProcessRequest,
 ) -> ProcessResponse:
-    """Trigger asynchronous extraction of uploaded images.
+    """Queue extraction for a set of uploaded files and return immediately.
 
-    Adds the specified file IDs to the processing queue and returns
-    immediately. Actual extraction happens in the background.
+    File IDs are validated by the ``ProcessRequest`` Pydantic model before
+    reaching this function. Extraction runs as a background task.
 
     Args:
-        request: FastAPI Request object (required for rate limiter).
-        background_tasks: FastAPI BackgroundTasks for scheduling
-            asynchronous extraction.
-        process_request: Request body containing validated file_ids list.
+        request: Required by the slowapi rate limiter.
+        background_tasks: FastAPI dependency used to schedule the extraction.
+        process_request: Validated request body containing ``file_ids``.
 
     Returns:
-        ProcessResponse with "processing_started" status.
-
-    Raises:
-        HTTPException: If file_ids are invalid.
-
-    Example:
-        # POST /process with {"file_ids": ["abc123...", "def456..."]}
+        ``{"status": "processing_started"}`` once the task is queued.
     """
     file_ids = process_request.file_ids
-
     async with _status_lock:
         for fid in file_ids:
             _status_tracker[fid] = {"state": "pending"}
 
-    model = settings.LITELM_API_MODEL
     endpoint = settings.LM_STUDIO_ENDPOINT.rstrip("/")
     if not endpoint.endswith("/v1"):
         endpoint = f"{endpoint}/v1"
     logger.info(
         f"Processing queued: {len(file_ids)} file(s) "
-        f"using {model} @ {endpoint}"
+        f"using {settings.LITELM_API_MODEL} @ {endpoint}"
     )
     background_tasks.add_task(_process_files, file_ids)
-
     return ProcessResponse(status="processing_started")
 
 
-@router.get("/status", response_model=dict)
+@router.get("/status")
 async def check_status() -> dict:
-    """Retrieve extraction status for all tracked files.
+    """Return the current extraction state for all tracked files.
 
-    Returns the current state of every file ID that has been registered
-    in the status tracker.
-
-    Returns:
-        Dictionary mapping file IDs to their status objects.
-
-    Example:
-        # GET /status
-        # Returns: {"status": {"abc123": {"state": "done", ...}}}
+    The tracker is reset when the service restarts. States:
+    ``pending`` → ``processing`` → ``done`` | ``failed``.
     """
     return {"status": _status_tracker}
 
 
 @router.get("/download/pages/{page_id}")
 async def download_page(page_id: str) -> FileResponse:
-    """Download the extracted markdown for a single page.
+    """Download a single extracted page as a markdown file.
+
+    The download filename uses the original upload name (e.g.
+    ``AS3610-1995_7.md``), falling back to ``{page_id}.md`` if the
+    original name is no longer in the in-memory map.
 
     Args:
-        page_id: The unique file ID (UUID hex) of the page to download.
-
-    Returns:
-        Markdown file as an attachment download.
+        page_id: 32-character hex UUID assigned at upload time.
 
     Raises:
-        HTTPException: If the page_id is invalid or file does not exist (404).
-
-    Example:
-        # GET /download/pages/abc123def456...
-        # Returns: original_filename.md (or {page_id}.md if name unknown)
+        HTTPException 404: Invalid ID format or file does not exist.
     """
     if not re.match(r"^[a-f0-9]{32}$", page_id):
         raise HTTPException(status_code=404, detail="Invalid page ID format")
-
     file_path = settings.EXTRACTED_DIR / f"page_{page_id}.md"
-
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Page not found")
-
     if not str(file_path.resolve()).startswith(str(settings.EXTRACTED_DIR.resolve())):
         raise HTTPException(status_code=404, detail="Invalid page path")
-
     original = _filename_map.get(page_id, "")
     download_name = (Path(original).stem + ".md") if original else f"{page_id}.md"
     return FileResponse(file_path, filename=download_name, media_type="text/markdown")
@@ -338,16 +310,15 @@ async def download_page(page_id: str) -> FileResponse:
 
 @router.get("/download/document")
 async def download_document() -> FileResponse:
-    """Download the fully assembled document.
+    """Download the assembled multi-page document.
 
-    Returns the merged markdown document containing all extracted pages.
+    Note:
+        ``assembler.assemble_document`` is not called automatically by the
+        web UI, so this endpoint returns 404 unless the file has been
+        created externally (e.g. by calling the assembler directly).
 
     Raises:
-        HTTPException: If the document has not been assembled yet (404).
-
-    Example:
-        # GET /download/document
-        # Returns: document.md as text/markdown
+        HTTPException 404: Document has not been assembled.
     """
     file_path = settings.OUTPUT_DIR / "document.md"
     if not file_path.exists():
@@ -358,40 +329,46 @@ async def download_document() -> FileResponse:
 @router.get("/download/zip")
 @limiter.limit("5/minute")
 async def download_zip(request: Request) -> FileResponse:
-    """Create and download a zip archive of all done pages.
+    """Create and immediately download a zip of all completed pages.
 
-    Creates a timestamped zip named {YYYYMMDD-HHMMSS}_{basename}.zip in
-    the temp directory, then serves it. Zips older than 24 hours are
-    automatically deleted by the background cleanup task.
+    Generates a timestamped zip in ``temp/`` and streams it to the client.
+    Zips older than 24 hours are cleaned up automatically.
+
+    Args:
+        request: Required by the slowapi rate limiter.
 
     Raises:
-        HTTPException: 400 if no files have completed extraction.
+        HTTPException 400: No pages have completed extraction yet.
     """
     async with _status_lock:
         done_ids = [
-            fid for fid, status in _status_tracker.items()
-            if status.get("state") == "done"
+            fid for fid, s in _status_tracker.items() if s.get("state") == "done"
         ]
-
     if not done_ids:
         raise HTTPException(status_code=400, detail="No extracted files to archive")
-
-    first_id = done_ids[0] if done_ids else None
-    original = _filename_map.get(first_id, "") if first_id else ""
+    original = _filename_map.get(done_ids[0], "")
     zip_basename = Path(original).stem if original else "extraction"
+    zip_path_str = await create_zip_archive(
+        done_ids, filename_map=_filename_map, zip_basename=zip_basename
+    )
+    return FileResponse(
+        zip_path_str, filename=Path(zip_path_str).name, media_type="application/zip"
+    )
 
-    zip_path_str = await create_zip_archive(done_ids, filename_map=_filename_map, zip_basename=zip_basename)
-    zip_filename = Path(zip_path_str).name
-    return FileResponse(zip_path_str, filename=zip_filename, media_type="application/zip")
-
-
-# --- Web UI Endpoints ---
 
 @router.get("/temp/zips")
 async def list_temp_zips() -> dict:
-    """List all zip archives in the temp directory."""
+    """List all zip archives currently in the temp directory.
+
+    Returns:
+        ``{"zips": [{filename, size_kb, created}, ...]}`` sorted newest first.
+    """
     zips = []
-    for f in sorted(settings.TEMP_DIR.glob("*.zip"), key=lambda x: x.stat().st_mtime, reverse=True):
+    for f in sorted(
+        settings.TEMP_DIR.glob("*.zip"),
+        key=lambda x: x.stat().st_mtime,
+        reverse=True,
+    ):
         stat = f.stat()
         zips.append({
             "filename": f.name,
@@ -403,7 +380,11 @@ async def list_temp_zips() -> dict:
 
 @router.post("/temp/clear")
 async def clear_temp_zips() -> dict:
-    """Delete all zip archives from the temp directory."""
+    """Delete all zip archives from the temp directory.
+
+    Returns:
+        ``{"deleted": N}`` with the count of files removed.
+    """
     deleted = 0
     for f in settings.TEMP_DIR.glob("*.zip"):
         try:
@@ -417,7 +398,16 @@ async def clear_temp_zips() -> dict:
 
 @router.get("/download/zip/{filename}")
 async def download_named_zip(filename: str) -> FileResponse:
-    """Download a specific named zip archive."""
+    """Download a specific named zip archive from the temp directory.
+
+    Args:
+        filename: Basename of the zip file (e.g.
+            ``20260509-093521_AS3610-1995.zip``). Must match
+            ``[\\w-]+\\.zip``.
+
+    Raises:
+        HTTPException 404: File does not exist or name is invalid.
+    """
     if not re.match(r"^[\w\-]+\.zip$", filename):
         raise HTTPException(status_code=404, detail="Invalid filename")
     file_path = settings.TEMP_DIR / filename
@@ -428,14 +418,19 @@ async def download_named_zip(filename: str) -> FileResponse:
     return FileResponse(file_path, filename=filename, media_type="application/zip")
 
 
-@router.get("/")
-async def root() -> RedirectResponse:
-    return RedirectResponse(url="/ui/upload")
-
-
 @router.get("/preview/pages/{page_id}", response_class=PlainTextResponse)
 async def preview_page(page_id: str) -> PlainTextResponse:
-    """Return extracted markdown as plain text for in-browser preview."""
+    """Return extracted markdown as plain text for in-browser rendering.
+
+    Used by the Preview page's JavaScript to fetch page content without
+    triggering a file download (unlike ``/download/pages/{page_id}``).
+
+    Args:
+        page_id: 32-character hex UUID.
+
+    Raises:
+        HTTPException 404: Invalid ID or file does not exist.
+    """
     if not re.match(r"^[a-f0-9]{32}$", page_id):
         raise HTTPException(status_code=404, detail="Invalid page ID")
     file_path = settings.EXTRACTED_DIR / f"page_{page_id}.md"
@@ -444,35 +439,63 @@ async def preview_page(page_id: str) -> PlainTextResponse:
     return PlainTextResponse(file_path.read_text(encoding="utf-8"))
 
 
-@router.get("/ui/preview", response_class=HTMLResponse)
-async def render_preview_page(request: Request) -> HTMLResponse:
-    """Render the markdown preview page."""
-    return templates.TemplateResponse(request, "preview.html")
+@router.get("/")
+async def root() -> RedirectResponse:
+    """Redirect bare root URL to the upload page."""
+    return RedirectResponse(url="/ui/upload")
 
+
+# ---------------------------------------------------------------------------
+# Web UI template routes
+# ---------------------------------------------------------------------------
 
 @router.get("/ui/upload", response_class=HTMLResponse)
 async def render_upload_page(request: Request) -> HTMLResponse:
-    """Render the upload page HTML template."""
     return templates.TemplateResponse(request, "upload.html")
 
 
 @router.get("/ui/status", response_class=HTMLResponse)
 async def render_status_page(request: Request) -> HTMLResponse:
-    """Render the status page HTML template."""
     return templates.TemplateResponse(request, "status.html")
+
+
+@router.get("/ui/preview", response_class=HTMLResponse)
+async def render_preview_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "preview.html")
 
 
 @router.get("/ui/download", response_class=HTMLResponse)
 async def render_download_page(request: Request) -> HTMLResponse:
-    """Render the download page HTML template."""
     return templates.TemplateResponse(request, "download.html")
 
 
-# Create FastAPI app instance
+# ---------------------------------------------------------------------------
+# Application setup
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage startup and shutdown tasks for the application."""
+    logger.info("=" * 60)
+    logger.info("LLM Document Ingestion Service starting")
+    logger.info(f"  Model    : {settings.LITELM_API_MODEL}")
+    logger.info(f"  Endpoint : {settings.LM_STUDIO_ENDPOINT}")
+    logger.info(f"  Max size : {settings.MAX_IMAGE_SIZE_MB} MB per image")
+    logger.info(f"  Max batch: {settings.MAX_IMAGES_PER_BATCH} images")
+    logger.info(f"  Uploads  : {settings.UPLOADS_DIR}")
+    logger.info(f"  Extracted: {settings.EXTRACTED_DIR}")
+    logger.info("=" * 60)
+    cleanup_task = asyncio.create_task(_cleanup_temp_files())
+    yield
+    cleanup_task.cancel()
+    logger.info("Shutting down")
+
+
 app = FastAPI(
     title="LLM Document Ingestion",
     description="Extract structured markdown from document images using multimodal LLMs",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.include_router(router)
@@ -488,33 +511,9 @@ app.add_middleware(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize application startup tasks."""
-    logger.info("=" * 60)
-    logger.info("LLM Document Ingestion Service starting")
-    logger.info(f"  Model    : {settings.LITELM_API_MODEL}")
-    logger.info(f"  Endpoint : {settings.LM_STUDIO_ENDPOINT}")
-    logger.info(f"  Max size : {settings.MAX_IMAGE_SIZE_MB} MB per image")
-    logger.info(f"  Max batch: {settings.MAX_IMAGES_PER_BATCH} images")
-    logger.info(f"  Uploads  : {settings.UPLOADS_DIR}")
-    logger.info(f"  Extracted: {settings.EXTRACTED_DIR}")
-    logger.info("=" * 60)
-    asyncio.create_task(_cleanup_temp_files())
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up on application shutdown."""
-    logger.info("Shutting down LLM Document Ingestion Service")
-
-
-# Mount static files
 app_static_dir = Path(__file__).parent / "static"
 if app_static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(app_static_dir)), name="static")
-
 
 if __name__ == "__main__":
     import uvicorn

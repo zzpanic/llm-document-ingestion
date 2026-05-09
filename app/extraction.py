@@ -1,18 +1,18 @@
-"""Image extraction module using multimodal LLMs via litellm.
+"""Image extraction module — sends document page images to a multimodal LLM
+and returns structured markdown.
 
-Sends document page images to a configured LLM and returns structured
-markdown. Supports any OpenAI-compatible endpoint (LM Studio, vLLM,
-cloud APIs) via litellm's provider abstraction.
+Supports any OpenAI-compatible endpoint (LM Studio, vLLM, cloud APIs)
+via litellm's provider abstraction.
 
-The extraction prompt is loaded from prompt.txt at startup if present,
-falling back to the built-in EXTRACTION_PROMPT constant.
+The extraction prompt is loaded from ``prompt.txt`` at the project root
+on module import. If the file is absent or empty the built-in
+``EXTRACTION_PROMPT`` constant is used as a fallback.
 """
 
 import asyncio
 import base64
 import logging
 import time
-from typing import Dict
 
 import aiofiles
 import litellm
@@ -21,8 +21,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Default system prompt — used when prompt.txt is absent or empty.
-# Edit prompt.txt at the project root to override without rebuilding.
+# Built-in fallback prompt — override by editing prompt.txt at the project root.
+# Container restart (no rebuild) picks up prompt.txt changes.
 EXTRACTION_PROMPT: str = (
     "You are extracting text from a technical document image. Produce structured "
     "markdown output that preserves:\n\n"
@@ -42,7 +42,7 @@ EXTRACTION_PROMPT: str = (
 
 
 def _load_prompt() -> str:
-    """Load extraction prompt from prompt.txt if present, else use built-in default."""
+    """Return the contents of prompt.txt, or EXTRACTION_PROMPT if absent."""
     prompt_file = settings.BASE_DIR / "prompt.txt"
     if prompt_file.exists():
         text = prompt_file.read_text(encoding="utf-8").strip()
@@ -56,48 +56,42 @@ ACTIVE_PROMPT: str = _load_prompt()
 
 
 async def extract_single_image(image_path: str) -> str:
-    """Extract markdown text from a single document image.
+    """Extract markdown from a single document page image.
 
-    Reads the image file, encodes it as base64, and sends it to the
-    configured LLM via litellm for extraction.
+    Reads the image, base64-encodes it, and sends it to the configured
+    LLM endpoint via litellm. The provider prefix ``openai/`` is prepended
+    to the model name automatically if absent (required by litellm for
+    OpenAI-compatible endpoints). The endpoint URL has ``/v1`` appended
+    if not already present (required by the openai client library).
 
     Args:
-        image_path: Filesystem path to the image file to extract.
-            Expected to be a PNG or JPG file.
+        image_path: Absolute path to a PNG or JPG image file.
 
     Returns:
-        Extracted markdown text if successful, or 'FAILED' on error.
-
-    Raises:
-        Specific exceptions (FileNotFoundError, TimeoutError) are logged
-        with warnings. Unexpected exceptions are logged but not raised
-        to allow partial batch processing. All error cases return 'FAILED'.
-
-    Example:
-        >>> result = await extract_single_image("uploads/page_001.png")  # doctest: +SKIP
-        >>> if result != "FAILED":
-        ...     print(f"Extracted {len(result)} characters")
+        Extracted markdown text on success, or the sentinel string
+        ``"FAILED"`` on any error. Errors are logged; no exception is raised
+        so that a failed page does not abort the rest of a batch.
     """
     short_id = image_path.split("/")[-1].split(".")[0][:8]
     try:
-        # Read and encode image as base64 (non-blocking)
-        async with aiofiles.open(image_path, "rb") as image_file:
-            image_data = await image_file.read()
-            base64_image = base64.b64encode(image_data).decode("utf-8")
-
+        async with aiofiles.open(image_path, "rb") as f:
+            image_data = await f.read()
+        base64_image = base64.b64encode(image_data).decode("utf-8")
         size_kb = len(image_data) / 1024
 
-        # Derive MIME type from file extension so JPGs are sent correctly
-        mime_type = "image/jpeg" if image_path.lower().endswith((".jpg", ".jpeg")) else "image/png"
+        mime_type = (
+            "image/jpeg"
+            if image_path.lower().endswith((".jpg", ".jpeg"))
+            else "image/png"
+        )
 
-        # litellm requires a provider prefix for custom OpenAI-compatible endpoints
-        # (LM Studio, vLLM, Ollama). Auto-add "openai/" if not already present.
+        # litellm requires a provider prefix for OpenAI-compatible endpoints
         model = settings.LITELM_API_MODEL
         if "/" not in model:
             model = f"openai/{model}"
 
-        # openai client appends /chat/completions to api_base, so the base
-        # must include /v1 to reach LM Studio's OpenAI-compatible endpoint.
+        # The openai client appends /chat/completions to api_base, so /v1
+        # must be present in the base URL to reach LM Studio correctly.
         api_base = settings.LM_STUDIO_ENDPOINT.rstrip("/")
         if not api_base.endswith("/v1"):
             api_base = f"{api_base}/v1"
@@ -107,52 +101,45 @@ async def extract_single_image(image_path: str) -> str:
             f"→ {model} @ {api_base}"
         )
 
-        # Construct multi-modal message for litellm
         messages = [
-            {
-                "role": "system",
-                "content": ACTIVE_PROMPT
-            },
+            {"role": "system", "content": ACTIVE_PROMPT},
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "image_url",
-                        "image_url": f"data:{mime_type};base64,{base64_image}"
+                        "image_url": f"data:{mime_type};base64,{base64_image}",
                     }
-                ]
-            }
+                ],
+            },
         ]
 
         t0 = time.monotonic()
-        # api_key is required by the openai client even for local endpoints;
-        # LM Studio accepts any non-empty value.
-        # enable_thinking=False: Qwen3 thinking models put output in reasoning_content
-        # and leave content empty, which breaks litellm's response parser.
         response = await litellm.acompletion(
             model=model,
             messages=messages,
             api_base=api_base,
+            # api_key is required by the openai client even for local endpoints;
+            # LM Studio accepts any non-empty value.
             api_key="not-needed",
             max_tokens=16384,
             temperature=0,
             timeout=60,
+            # Qwen3 thinking models put reasoning in reasoning_content and
+            # leave content empty, which breaks litellm's response parser.
             extra_body={"enable_thinking": False},
         )
         elapsed = time.monotonic() - t0
 
-        # Extract markdown from response (ModelResponse object, not dict)
         markdown = response.choices[0].message.content
-        logger.info(
-            f"Done {short_id} → {len(markdown):,} chars in {elapsed:.1f}s"
-        )
+        logger.info(f"Done {short_id} → {len(markdown):,} chars in {elapsed:.1f}s")
         return markdown
 
     except FileNotFoundError:
         logger.warning(f"File not found: {image_path}")
         return "FAILED"
     except TimeoutError:
-        logger.warning(f"Timeout extracting {short_id} (>{60}s) — consider smaller images")
+        logger.warning(f"Timeout extracting {short_id} — consider smaller images")
         return "FAILED"
     except (ValueError, KeyError) as exc:
         logger.warning(f"Unexpected response format for {short_id}: {exc}")
@@ -160,43 +147,3 @@ async def extract_single_image(image_path: str) -> str:
     except Exception as exc:
         logger.error(f"Extraction failed for {short_id}: {type(exc).__name__}: {exc}")
         return "FAILED"
-
-
-async def extract_batch(image_paths: list[str]) -> Dict[str, str]:
-    """Extract markdown from multiple images concurrently.
-
-    Processes a batch of image paths using asyncio.gather and returns
-    a mapping of file paths to their extracted markdown content.
-
-    Args:
-        image_paths: List of filesystem paths to image files.
-            Each path should point to a valid PNG or JPG file.
-
-    Returns:
-        Dictionary mapping image paths to extracted markdown strings.
-        Failed extractions map to the string "FAILED".
-
-    Raises:
-        No exceptions are raised. Individual page failures return
-        "FAILED" in the result dictionary.
-
-    Example:
-        >>> paths = ["uploads/p1.png", "uploads/p2.png"]  # doctest: +SKIP
-        >>> results = await extract_batch(paths)  # doctest: +SKIP
-        >>> for path, md in results.items():
-        ...     print(f"{path}: {len(md)} chars")
-    """
-    results: Dict[str, str] = {}
-
-    # Process images concurrently using asyncio.gather
-    coroutines = [extract_single_image(path) for path in image_paths]
-    extracted = await asyncio.gather(*coroutines, return_exceptions=True)
-
-    for path, result in zip(image_paths, extracted):
-        if isinstance(result, Exception):
-            logger.error(f"Batch extraction failed for {path}: {result}")
-            results[path] = "FAILED"
-        else:
-            results[path] = result
-
-    return results
