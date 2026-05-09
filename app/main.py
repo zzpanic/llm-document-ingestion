@@ -90,7 +90,6 @@ async def _process_files(file_ids: list[str]) -> None:
         f"of up to {settings.BATCH_SIZE}"
     )
     done = failed = 0
-    prior_context = ""
 
     batches = [
         file_ids[i:i + settings.BATCH_SIZE]
@@ -123,9 +122,7 @@ async def _process_files(file_ids: list[str]) -> None:
             logger.warning(f"[Batch {batch_num}] No images found, skipping")
             continue
 
-        markdown = await extract_image_batch(
-            [p for _, p in resolved], prior_context=prior_context
-        )
+        markdown = await extract_image_batch([p for _, p in resolved])
 
         if markdown == "FAILED":
             logger.warning(f"[Batch {batch_num}] Extraction failed")
@@ -146,7 +143,6 @@ async def _process_files(file_ids: list[str]) -> None:
                             "markdown_length": len(markdown),
                         }
                 done += len(resolved)
-                prior_context = markdown[-4000:]
                 logger.info(
                     f"[Batch {batch_num}] Done → {out_path.name} ({len(markdown):,} chars)"
                 )
