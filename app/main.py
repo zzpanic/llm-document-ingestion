@@ -1,16 +1,8 @@
 """FastAPI application for the document ingestion service.
 
 Provides REST endpoints for uploading images, triggering extraction,
-checking status, and downloading results. Uses background tasks for
-asynchronous processing.
-
-This module implements the API layer described in the implementation spec,
-Section 7: FastAPI Application.
-
-Recommended libraries:
-    - fastapi>=0.115.0: Web framework with automatic OpenAPI docs
-    - uvicorn[standard]>=0.34.0: ASGI server
-    - jinja2>=3.1.4: HTML template rendering
+checking status, previewing and downloading results. Uses FastAPI
+background tasks for non-blocking extraction.
 """
 
 import asyncio
@@ -326,7 +318,7 @@ async def download_page(page_id: str) -> FileResponse:
 
     Example:
         # GET /download/pages/abc123def456...
-        # Returns: page_abc123def456....md as text/markdown
+        # Returns: original_filename.md (or {page_id}.md if name unknown)
     """
     if not re.match(r"^[a-f0-9]{32}$", page_id):
         raise HTTPException(status_code=404, detail="Invalid page ID format")
@@ -366,20 +358,14 @@ async def download_document() -> FileResponse:
 @router.get("/download/zip")
 @limiter.limit("5/minute")
 async def download_zip(request: Request) -> FileResponse:
-    """Download a zip archive of all extracted files.
+    """Create and download a zip archive of all done pages.
 
-    Returns a zip file containing all page markdowns and the merged document.
-
-    Note:
-        The zip is created on-demand from cached extracted files.
-        Zip files are automatically cleaned up after 24 hours.
+    Creates a timestamped zip named {YYYYMMDD-HHMMSS}_{basename}.zip in
+    the temp directory, then serves it. Zips older than 24 hours are
+    automatically deleted by the background cleanup task.
 
     Raises:
-        HTTPException: If no files are available for archiving (400).
-
-    Example:
-        # GET /download/zip
-        # Returns: document_extraction.zip as application/zip
+        HTTPException: 400 if no files have completed extraction.
     """
     async with _status_lock:
         done_ids = [
@@ -486,7 +472,7 @@ async def render_download_page(request: Request) -> HTMLResponse:
 app = FastAPI(
     title="LLM Document Ingestion",
     description="Extract structured markdown from document images using multimodal LLMs",
-    version="1.0"
+    version="0.1.0"
 )
 
 app.include_router(router)

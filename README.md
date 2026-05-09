@@ -1,6 +1,6 @@
 # LLM Document Ingestion Service
 
-**Convert scanned technical documents into machine-readable markdown with proper LaTeX mathematical formulas using multimodal AI models.**
+A FastAPI web service that extracts structured markdown from scanned document images using multimodal LLMs. Intended for technical documents with mathematical notation, tables, and structured layouts.
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)
@@ -9,85 +9,48 @@
 
 ---
 
-## Overview
+## What it does
 
-This FastAPI-based service extracts structured markdown from document images using multimodal large language models. It's specifically designed for technical documents (engineering standards, textbooks, research papers) with complex mathematical notation, tables, and structured layouts.
+Upload PNG/JPG images of document pages. The service sends each image to a multimodal LLM (via [litellm](https://github.com/BerriAI/litellm)), receives structured markdown back, and saves the results. You can then preview and download the extracted files.
 
-**Key capability**: Convert scanned PDFs and images into clean, searchable markdown with:
-- ✅ Proper document structure (headings, lists, tables)
-- ✅ LaTeX-formatted mathematical formulas
-- ✅ Preserved cross-references and clause numbers
-- ✅ Multi-page document assembly
-- ✅ Batch processing with progress tracking
+Works with any OpenAI-compatible endpoint — LM Studio running a local model is the intended setup, but cloud APIs (OpenAI, Anthropic) work too.
 
-### Why This Service?
+The extraction prompt is fully customisable via `prompt.txt` at the project root without rebuilding the container.
 
-Traditional PDF extraction tools produce "garbage text" from scanned documents. This service leverages multimodal AI to achieve:
-
-| Aspect | PDF Tools | This Service |
-|--------|-----------|--------------|
-| Mathematical formulas | Corrupted Unicode | Clean LaTeX |
-| Document structure | Lost | Preserved |
-| Complex layouts | Failed | Handled |
-| Quality | 30-50% | 85%+ |
+**What it does not do:** it does not stitch pages into a single merged document in the current UI workflow. Each page is extracted and saved individually.
 
 ---
 
-## Features
+## Web Interface
 
-### Core Capabilities
-- 🖼️ **Multi-format image support** - PNG, JPG/JPEG
-- 🔄 **Asynchronous processing** - Non-blocking I/O, background tasks
-- 📊 **Batch operations** - Process multiple documents simultaneously
-- 📈 **Progress tracking** - Real-time extraction status
-- 📁 **Multiple outputs** - Individual pages, assembled document, zip archive
+Four pages, navigable via the header:
 
-### Technical Features
-- 🔒 **Security hardened** - Path traversal prevention, rate limiting, input validation
-- ⚡ **High performance** - Async/await throughout, efficient file I/O
-- 🔧 **Configurable** - Environment-based settings, works with any LLM provider
-- 🐳 **Container ready** - Docker and Docker Compose included
-- 📝 **Well documented** - API docs, setup guides, troubleshooting
+| Page | URL | Purpose |
+|---|---|---|
+| Upload | `/ui/upload` | Drag-and-drop images, single button to upload and start extraction |
+| Status | `/ui/status` | Per-file progress with ETA, download links as pages complete |
+| Preview | `/ui/preview` | Rendered markdown viewer with KaTeX for LaTeX formulas |
+| Download | `/ui/download` | Timestamped zip archives, individual page downloads, clear temp folder |
 
-### LLM Flexibility
-Works with any multimodal LLM provider via **litellm**:
-- 🏠 **Local models** - Qwen-VL, LLaVA (run on your hardware)
-- ☁️ **Cloud APIs** - GPT-4 Vision, Claude, Gemini
-- 🔌 **Custom endpoints** - LM Studio, vLLM, Ollama
+A zip is created automatically when a batch finishes.
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-- Python 3.11+
-- Multimodal LLM (e.g., Qwen 3.5-9B running in LM Studio)
-- 4GB+ available disk space
-
-### Local Development (5 minutes)
+### Local (no Docker)
 
 ```bash
-# Clone and setup
-git clone <repo-url>
+git clone https://github.com/zzpanic/llm-document-ingestion.git
 cd llm-document-ingestion
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-
-# Configure (optional - defaults work with local LM Studio)
-cp .env.example .env
-# Edit .env if using remote LM Studio or cloud APIs
-
-# Make sure LM Studio is running with a model loaded
-# (visit http://localhost:1234 to verify)
-
-# Start the service
+cp .env.example .env       # edit if your LM Studio is not on localhost:1234
 python -m uvicorn app.main:app --reload
-
-# Open browser
-# Web UI: http://localhost:8000/ui/upload
-# API docs: http://localhost:8000/docs
 ```
+
+Open `http://localhost:8000` — redirects to the upload page.
 
 ### Docker
 
@@ -95,206 +58,47 @@ python -m uvicorn app.main:app --reload
 git clone https://github.com/zzpanic/llm-document-ingestion.git
 cd llm-document-ingestion
 docker compose build
-
-# Docker Desktop (Mac/Windows) — host.docker.internal reaches the host machine
 docker compose up -d
-
-# Linux host or remote LM Studio — set the LAN IP explicitly
-LM_STUDIO_ENDPOINT=http://192.168.1.81:1234 docker compose up -d
-
-# View logs
-docker-compose logs -f document-ingestion
-
-# Stop
-docker-compose down
 ```
 
----
-
-## Usage
-
-### Web Interface
-
-1. **Upload Page** (`/ui/upload`)
-   - Drag and drop image files
-   - Supports PNG and JPG up to 10MB each
-   - Validate files before uploading
-
-2. **Status Page** (`/ui/status`)
-   - Watch extraction progress in real-time
-   - Auto-refreshes every 3 seconds
-   - See error messages for failed pages
-
-3. **Download Page** (`/ui/download`)
-   - Download individual page markdown files
-   - Download zip archive of all extracted pages
-
-### REST API
-
-#### Upload Images
-```bash
-curl -X POST http://localhost:8000/upload \
-  -F "files=@page1.png" \
-  -F "files=@page2.jpg"
-```
-
-Response:
-```json
-{
-  "uploaded": [
-    {"id": "abc123def456...", "filename": "page1.png"},
-    {"id": "xyz789uvw012...", "filename": "page2.jpg"}
-  ]
-}
-```
-
-#### Trigger Extraction
-```bash
-curl -X POST http://localhost:8000/process \
-  -H "Content-Type: application/json" \
-  -d '{"file_ids": ["abc123def456...", "xyz789uvw012..."]}'
-```
-
-Response:
-```json
-{"status": "processing_started"}
-```
-
-#### Check Status
-```bash
-curl http://localhost:8000/status
-```
-
-Response:
-```json
-{
-  "status": {
-    "abc123def456...": {
-      "state": "done",
-      "markdown_length": 5432
-    },
-    "xyz789uvw012...": {
-      "state": "processing"
-    }
-  }
-}
-```
-
-#### Download Results
-```bash
-# Single page
-curl http://localhost:8000/download/pages/abc123def456... -o page.md
-
-# Assembled document
-curl http://localhost:8000/download/document -o document.md
-
-# Zip archive
-curl http://localhost:8000/download/zip -o archive.zip
-```
-
-### API Documentation
-
-Interactive API docs available at:
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-
----
-
-## Architecture
-
-### System Design
-
-```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Browser   │────▶│  FastAPI Service │────▶│  LLM Model      │
-│  (Web UI)   │     │  (app/main.py)   │     │  (LM Studio /   │
-└─────────────┘     └──────────────────┘     │   Cloud API)    │
-                            │                 └─────────────────┘
-                            ▼
-                    ┌──────────────────┐
-                    │  Extraction      │
-                    │  (app/extraction)│
-                    └──────────────────┘
-                            │
-                            ▼
-                    ┌──────────────────┐
-                    │  File Storage    │
-                    │  (uploads/,      │
-                    │   extracted/)    │
-                    └──────────────────┘
-                            │
-                            ▼
-                    ┌──────────────────┐
-                    │  Assembly        │
-                    │  (app/assembler) │
-                    └──────────────────┘
-                            │
-                            ▼
-                    ┌──────────────────┐
-                    │  Output          │
-                    │  (output/,       │
-                    │   temp/)         │
-                    └──────────────────┘
-```
-
-### Component Breakdown
-
-| Component | File | Purpose |
-|-----------|------|---------|
-| **Web Server** | `app/main.py` | FastAPI routes, uploads, status tracking, downloads |
-| **Image Extraction** | `app/extraction.py` | LLM API calls, markdown parsing, error handling |
-| **Document Assembly** | `app/assembler.py` | Merge pages, create zip archives |
-| **Configuration** | `app/config.py` | Settings management, validation |
-| **Data Models** | `app/models.py` | Pydantic schemas, request/response validation |
-
-### Data Flow
-
-1. **Upload** → User uploads image files (PNG/JPG)
-2. **Validate** → Check file type, size, count
-3. **Store** → Save to `uploads/` with UUID name
-4. **Extract** → Send to LLM, receive markdown
-5. **Save** → Store per-page markdown to `extracted/`
-6. **Assemble** → Merge pages with page separators
-7. **Archive** → Create zip with all files
-8. **Download** → Serve results via REST API
+**Networking note:** inside a Docker container `localhost` refers to the container itself. Docker Desktop users: the default endpoint `http://host.docker.internal:1234` reaches the host. Linux users: set `LM_STUDIO_ENDPOINT` to the host's LAN IP in `.env`.
 
 ---
 
 ## Configuration
 
-### Environment Variables
+Copy `.env.example` to `.env` and set:
 
-Create `.env` file (copy from `.env.example`):
+| Variable | Default | Notes |
+|---|---|---|
+| `LM_STUDIO_ENDPOINT` | `http://localhost:1234` | Base URL of your LLM API (without `/v1`) |
+| `LITELM_API_MODEL` | `qwen3.5-9b` | Model identifier — must match what's loaded |
+| `MAX_IMAGES_PER_BATCH` | `100` | Max files per upload |
+| `MAX_IMAGE_SIZE_MB` | `10` | Per-file size limit |
 
-```env
-# LM Studio endpoint (or cloud API endpoint)
-LM_STUDIO_ENDPOINT=http://localhost:1234
+### Extraction prompt
 
-# Model to use for extraction
-LITELM_API_MODEL=qwen3.5-9b
+Edit `prompt.txt` in the project root to customise how the LLM extracts text. The container reads it at startup — a container restart picks up changes without a rebuild. If `prompt.txt` is absent, the built-in default is used.
 
-# Application constraints
-MAX_IMAGES_PER_BATCH=100
-MAX_IMAGE_SIZE_MB=10
-```
+---
 
-### Startup Validation
+## REST API
 
-Configuration is validated on application start:
-- ✅ Endpoint is a valid URL
-- ✅ Model name is non-empty
-- ✅ Image constraints are reasonable
-- ✅ Directories are writable
+| Method | Path | Description |
+|---|---|---|
+| POST | `/upload` | Upload images (multipart/form-data, field `files`) |
+| POST | `/process` | Start extraction (`{"file_ids": [...]}`) |
+| GET | `/status` | Extraction state for all tracked files |
+| GET | `/download/pages/{page_id}` | Download a single extracted `.md` file |
+| GET | `/download/zip` | Create and download a zip of all done pages |
+| GET | `/download/zip/{filename}` | Download a specific named zip from temp/ |
+| GET | `/preview/pages/{page_id}` | Return markdown as plain text (for browser preview) |
+| GET | `/temp/zips` | List zip archives in temp/ |
+| POST | `/temp/clear` | Delete all zips from temp/ |
 
-Startup fails with clear error messages if validation fails.
+Rate limits: 10 req/min on `/upload`, 5 req/min on `/process` and `/download/zip`.
 
-### Recommended Settings
-
-| Setting | Development | Production |
-|---------|-------------|------------|
-| `LM_STUDIO_ENDPOINT` | `http://localhost:1234` | `http://your-lm-studio:1234` |
-| `MAX_IMAGE_SIZE_MB` | `10` | `20` (for better quality) |
-| `MAX_IMAGES_PER_BATCH` | `50` | `100` |
+API docs (Swagger): `http://localhost:8000/docs`
 
 ---
 
@@ -303,530 +107,38 @@ Startup fails with clear error messages if validation fails.
 ```
 llm-document-ingestion/
 ├── app/
-│   ├── __init__.py              # Package initialization
-│   ├── main.py                  # FastAPI application, routes
-│   ├── extraction.py            # LLM extraction logic
-│   ├── assembler.py             # Document assembly, zip creation
-│   ├── config.py                # Configuration management
-│   ├── models.py                # Pydantic request/response models
-│   ├── templates/               # Jinja2 HTML templates
-│   │   ├── base.html            # Base template
-│   │   ├── upload.html          # Upload page
-│   │   ├── status.html          # Status page
-│   │   └── download.html        # Download page
-│   └── static/                  # Static files (CSS, JS)
-│       ├── css/
-│       │   └── style.css        # Stylesheet
-│       └── js/
-│           └── app.js           # Client-side logic
-├── uploads/                     # Raw uploaded images (gitignored)
-├── extracted/                   # Per-page extracted markdown (gitignored)
-├── output/                      # Assembled documents (gitignored)
-├── temp/                        # Temporary files (gitignored)
-├── Dockerfile                   # Container image definition
-├── docker-compose.yml           # Multi-container orchestration
-├── requirements.txt             # Python dependencies
-├── .env.example                 # Configuration template
-├── README.md                    # This file
-├── QUICK_START.md              # Setup and troubleshooting guide
-├── architectural-whitepaper.md  # Methodology overview
-├── algorithm.md                 # Detailed extraction algorithm
-└── implementation-spec.md       # Implementation details
+│   ├── main.py            # FastAPI routes and app setup
+│   ├── extraction.py      # LLM calls via litellm
+│   ├── assembler.py       # Zip creation and page assembly
+│   ├── config.py          # Settings from environment variables
+│   ├── models.py          # Pydantic request/response models
+│   ├── templates/         # Jinja2 HTML templates
+│   │   ├── base.html
+│   │   ├── upload.html
+│   │   ├── status.html
+│   │   ├── preview.html
+│   │   └── download.html
+│   └── static/
+│       ├── css/style.css
+│       └── js/app.js
+├── prompt.txt             # Customisable extraction prompt
+├── VERSION                # Current version (read by app at startup)
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+└── .env.example
 ```
+
+Data directories (`uploads/`, `extracted/`, `output/`, `temp/`) are gitignored and mounted as Docker volumes.
 
 ---
 
-## Installation
+## Versioning
 
-### From Source
-
-**Requirements:**
-- Python 3.11 or higher
-- pip and venv
-- 4GB+ RAM
-- 10GB+ disk space (for documents and extracted content)
-
-**Steps:**
-
-```bash
-# Clone the repository
-git clone <repository-url>
-cd llm-document-ingestion
-
-# Create virtual environment
-python -m venv venv
-
-# Activate environment
-# On Linux/macOS:
-source venv/bin/activate
-# On Windows:
-venv\Scripts\activate
-
-# Install dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
-
-# Verify installation
-python -c "import fastapi; import litellm; print('✓ All dependencies installed')"
-```
-
-### Using Docker
-
-**Requirements:**
-- Docker 20.10+
-- Docker Compose 2.0+
-- Docker Desktop (or Docker Engine + Compose)
-
-**Steps:**
-
-```bash
-# Build image
-docker-compose build
-
-# Start container
-docker-compose up -d
-
-# Verify
-docker-compose ps
-```
-
----
-
-## Running the Service
-
-### Local Development with Auto-Reload
-
-```bash
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Features:
-- Auto-restarts on code changes
-- Verbose logging output
-- Perfect for development
-
-### Production with Gunicorn
-
-```bash
-pip install gunicorn
-gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app
-```
-
-Features:
-- Multiple worker processes
-- Load balanced
-- Production-ready
-
-### Docker Deployment
-
-```bash
-# Start
-docker-compose up -d
-
-# View logs
-docker-compose logs -f document-ingestion
-
-# Stop
-docker-compose down
-
-# Stop and remove volumes
-docker-compose down -v
-```
-
----
-
-## API Reference
-
-### Endpoints
-
-#### POST `/upload`
-Upload document images for extraction.
-
-**Request:**
-- Content-Type: `multipart/form-data`
-- Parameter: `files` (List of file uploads)
-
-**Response:** `UploadResponse`
-```json
-{
-  "uploaded": [
-    {"id": "abc123...", "filename": "page1.png"}
-  ]
-}
-```
-
-**Errors:**
-- 400: Unsupported file type or size exceeds limit
-- 429: Rate limit exceeded (10 per minute)
-
----
-
-#### POST `/process`
-Trigger extraction on uploaded images.
-
-**Request:** `ProcessRequest`
-```json
-{
-  "file_ids": ["abc123...", "def456..."]
-}
-```
-
-**Response:** `ProcessResponse`
-```json
-{"status": "processing_started"}
-```
-
-**Errors:**
-- 400: Invalid file_ids
-- 429: Rate limit exceeded (5 per minute)
-
----
-
-#### GET `/status`
-Get extraction status for all files.
-
-**Response:** `StatusResponse`
-```json
-{
-  "status": {
-    "abc123...": {
-      "state": "done",
-      "markdown_length": 5432
-    }
-  }
-}
-```
-
-**States:**
-- `pending` - Waiting to be processed
-- `processing` - Currently extracting
-- `done` - Successfully extracted
-- `failed` - Extraction failed
-
----
-
-#### GET `/download/pages/{page_id}`
-Download extracted markdown for a single page.
-
-**Response:** Markdown file (text/markdown)
-
-**Errors:**
-- 404: Page not found or invalid ID
-
----
-
-#### GET `/download/document`
-Download fully assembled document (all pages merged).
-
-> **Note:** This endpoint requires `POST /assemble` to be called first (not yet exposed via the web UI). Returns 404 until assembly is triggered manually.
-
-**Response:** Markdown file (text/markdown)
-
-**Errors:**
-- 404: Document not assembled yet
-
----
-
-#### GET `/download/zip`
-Download zip archive of all outputs.
-
-**Response:** ZIP file (application/zip)
-
-**Errors:**
-- 400: No extracted files
-- 429: Rate limit exceeded (5 per minute)
-
----
-
-#### GET `/ui/upload`
-Web interface - upload page
-
-#### GET `/ui/status`
-Web interface - status page
-
-#### GET `/ui/download`
-Web interface - download page
-
----
-
-## Advanced Usage
-
-### Batch Processing Multiple Documents
-
-```bash
-# Document 1: Upload pages 1-5
-curl -X POST http://localhost:8000/upload \
-  -F "files=@doc1_p1.png" \
-  -F "files=@doc1_p2.png" \
-  -F "files=@doc1_p3.png"
-
-# Extract
-curl -X POST http://localhost:8000/process \
-  -H "Content-Type: application/json" \
-  -d '{"file_ids": ["id1", "id2", "id3"]}'
-
-# Monitor status
-curl http://localhost:8000/status
-
-# Download when done
-curl http://localhost:8000/download/document -o doc1_extracted.md
-curl http://localhost:8000/download/zip -o doc1.zip
-
-# Repeat for Document 2...
-```
-
-### Using Cloud LLM Providers
-
-**OpenAI GPT-4 Vision:**
-```bash
-export OPENAI_API_KEY=sk-...
-export LM_STUDIO_ENDPOINT=https://api.openai.com/v1
-export LITELM_API_MODEL=gpt-4-vision
-python -m uvicorn app.main:app
-```
-
-**Anthropic Claude:**
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-export LM_STUDIO_ENDPOINT=https://api.anthropic.com/v1
-export LITELM_API_MODEL=claude-opus-4
-python -m uvicorn app.main:app
-```
-
----
-
-## Performance Tuning
-
-### For Faster Processing
-```env
-# Use lighter model
-LITELM_API_MODEL=qwen3.5-9b
-
-# Reduce image size
-MAX_IMAGE_SIZE_MB=5
-
-# Process fewer pages per batch
-MAX_IMAGES_PER_BATCH=20
-```
-
-### For Better Quality
-```env
-# Use heavier model
-LITELM_API_MODEL=qwen-vl-plus
-
-# Increase image size
-MAX_IMAGE_SIZE_MB=20
-
-# Process more pages per batch
-MAX_IMAGES_PER_BATCH=100
-```
-
-### Hardware Requirements
-
-| Task | CPU | RAM | Disk | GPU |
-|------|-----|-----|------|-----|
-| API Server | 1 core | 512MB | 1GB | Optional |
-| LM Model (7B) | 4+ cores | 16GB | 20GB | Recommended |
-| LM Model (13B) | 8+ cores | 24GB | 30GB | Recommended |
-
----
-
-## Security
-
-### Built-In Protections
-
-- ✅ **Path Traversal Prevention** - UUID validation on file IDs
-- ✅ **Rate Limiting** - 10 uploads/min, 5 process/min per IP
-- ✅ **Input Validation** - Pydantic models validate all inputs
-- ✅ **File Type Validation** - Only PNG and JPG accepted
-- ✅ **Size Limits** - Max 10MB per file (configurable)
-- ✅ **CORS Configured** - Allows cross-origin requests
-
-### Deployment Security
-
-For production deployment:
-1. **Use HTTPS** - Place behind reverse proxy (nginx, traefik)
-2. **Rate Limiting** - Consider stricter limits
-3. **Authentication** - Add API key or OAuth if needed
-4. **Network** - Run on private network or VPN
-5. **Monitoring** - Monitor logs and resource usage
-6. **Secrets** - Never commit `.env` or API keys
-
----
-
-## Troubleshooting
-
-### Issue: "Connection refused" to LM Studio
-
-**Solution:**
-```bash
-# Verify LM Studio is running
-curl http://localhost:1234/health
-
-# Check endpoint in .env
-cat .env | grep LM_STUDIO_ENDPOINT
-
-# Verify network connectivity
-ping localhost
-```
-
-### Issue: "Invalid configuration" on startup
-
-**Solution:**
-```bash
-# Check endpoint URL format
-# ❌ Wrong: 192.168.1.81:1234
-# ✅ Correct: http://192.168.1.81:1234
-
-# Verify environment variables
-env | grep LM_STUDIO
-env | grep LITELM
-```
-
-### Issue: Extraction timing out
-
-**Solution:**
-```bash
-# Reduce image size/resolution
-MAX_IMAGE_SIZE_MB=5
-
-# Use simpler model
-LITELM_API_MODEL=qwen3.5-9b
-
-# Check LM Studio isn't overloaded
-curl http://localhost:1234/health
-```
-
-### Issue: Out of disk space
-
-**Solution:**
-```bash
-# Manual cleanup
-rm -rf uploads/* extracted/* output/* temp/*.zip
-
-# Auto cleanup runs hourly
-# Temp zip files deleted after 1 day
-
-# Monitor disk usage
-du -sh uploads/ extracted/ output/ temp/
-```
-
----
-
-## Development
-
-### Project Setup for Contributors
-
-```bash
-git clone <repository-url>
-cd llm-document-ingestion
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Run with auto-reload
-python -m uvicorn app.main:app --reload
-```
-
-### Code Style
-
-- **Linting**: Follow PEP 8
-- **Type Hints**: Required on all functions
-- **Docstrings**: Google style on all public functions
-- **Tests**: Unit tests in `tests/` directory
-- **Commits**: Descriptive messages
-
-### Key Files to Understand
-
-1. **app/main.py** - FastAPI routes and request handling
-2. **app/extraction.py** - LLM integration and image processing
-3. **app/assembler.py** - Document merging and zip creation
-4. **app/config.py** - Settings and configuration validation
-
----
-
-## Documentation
-
-- **[QUICK_START.md](QUICK_START.md)** - Setup guide and troubleshooting
-- **[architectural-whitepaper.md](architectural-whitepaper.md)** - Methodology overview
-- **[algorithm.md](algorithm.md)** - Detailed extraction algorithm
-- **[implementation-spec.md](implementation-spec.md)** - Implementation details
+See [version.md](version.md) for how to bump the version.
 
 ---
 
 ## License
 
-MIT License - See LICENSE file for details
-
----
-
-## Support
-
-### Getting Help
-
-1. Check [QUICK_START.md](QUICK_START.md) for common issues
-2. Check application logs: `docker-compose logs document-ingestion`
-3. Verify LM Studio is accessible and model is loaded
-
-### Reporting Issues
-
-Include:
-- Error message and stack trace
-- Configuration (LM Studio endpoint, model)
-- Environment (OS, Python version, Docker version)
-- Steps to reproduce
-
----
-
-## Roadmap
-
-### Planned Features
-
-- [ ] Web-based document preview
-- [ ] Batch job scheduling
-- [ ] Webhook notifications on completion
-- [ ] User authentication and API keys
-- [ ] Document versioning and history
-- [ ] Export to PDF with preserved formatting
-- [ ] Integration with document management systems
-
-### Known Limitations
-
-- Single LLM model per deployment (can run multiple instances)
-- Files stored locally (no cloud storage backend yet)
-- No database (stateless design, requires external storage for persistence)
-- Rate limiting per IP (no per-user accounting)
-
----
-
-## Contributing
-
-We welcome contributions! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Write tests for new features
-4. Ensure all tests pass
-5. Submit a pull request with clear description
-
----
-
-## Changelog
-
-### v1.0.0 (2026-05-05)
-- ✅ Initial release
-- ✅ All 23 identified issues fixed
-- ✅ Production-ready code
-- ✅ Comprehensive documentation
-
----
-
-## Contact
-
-For questions or suggestions, reach out via GitHub issues.
-
----
-
-**Happy extracting! 🚀**
-
-Built with ❤️ using FastAPI, Pydantic, and litellm
+MIT — see [LICENSE](LICENSE).

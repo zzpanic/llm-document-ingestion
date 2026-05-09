@@ -136,6 +136,10 @@ async def create_zip_archive(
 
     Args:
         file_ids: List of file IDs to include in the archive.
+        filename_map: Optional mapping of file_id to original upload filename,
+            used to name files inside the zip with their original names.
+        zip_basename: Stem used in the zip filename, e.g. "AS3610-1995" produces
+            "20260509-093521_AS3610-1995.zip". Defaults to "extraction".
 
     Returns:
         Path to the created zip archive file as a string.

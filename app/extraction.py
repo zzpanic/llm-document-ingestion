@@ -1,14 +1,11 @@
 """Image extraction module using multimodal LLMs via litellm.
 
-Provides functions for extracting markdown text from document images
-using any supported LLM provider. Uses litellm as a uniform abstraction
-layer over diverse LLM APIs including OpenAI, Anthropic, Ollama, and LM Studio.
+Sends document page images to a configured LLM and returns structured
+markdown. Supports any OpenAI-compatible endpoint (LM Studio, vLLM,
+cloud APIs) via litellm's provider abstraction.
 
-This module implements the extraction step described in the algorithm specification,
-Phase 2: AI Extraction.
-
-Recommended libraries:
-    - litellm>=1.57.0: Universal LLM API abstraction
+The extraction prompt is loaded from prompt.txt at startup if present,
+falling back to the built-in EXTRACTION_PROMPT constant.
 """
 
 import asyncio
@@ -24,8 +21,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Default system prompt — used when no prompt.txt file is present.
-# See algorithm.md, Appendix B for document-type-specific prompt variations.
+# Default system prompt — used when prompt.txt is absent or empty.
+# Edit prompt.txt at the project root to override without rebuilding.
 EXTRACTION_PROMPT: str = (
     "You are extracting text from a technical document image. Produce structured "
     "markdown output that preserves:\n\n"
